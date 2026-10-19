@@ -1,0 +1,89 @@
+# Checklist tes manual
+
+Tes dilakukan paralel: **macOS** (rumah) dan **Windows** (laptop kantor, tanpa
+hak admin). Pakai artifact CI dari PR yang sedang dites (lihat README → "Cara
+pakai tanpa build"), lalu centang hasilnya di PR.
+
+Tips umum:
+- Nyalakan **Mode debug** dari tray untuk melihat sumber, posisi mentah vs
+  interpolasi, offset, status & latency LRCLIB, dan umur sampel.
+- Kalau ada yang aneh, lampirkan isi `mini-lyrics.log` (tray → **Buka folder
+  log**) dan teks versi/commit di baris pertama menu tray.
+- `MINI_LYRICS_DEMO=1` menjalankan lagu & lirik palsu untuk cek UI tanpa
+  Spotify/jaringan.
+
+## Persiapan
+
+| | macOS | Windows |
+|---|---|---|
+| App terbuka tanpa error (macOS: setelah `xattr -dr com.apple.quarantine`; Windows: SmartScreen → Run anyway) | ☐ | ☐ |
+| Tidak ada ikon di Dock (macOS) / taskbar (Windows) | ☐ | ☐ |
+| Ikon not kuning muncul di menu bar / tray | ☐ | ☐ |
+| Label versi + commit di menu tray sesuai PR | ☐ | ☐ |
+| macOS: prompt izin Automation untuk Spotify muncul & diizinkan | ☐ | – |
+| Tanpa lagu diputar: tampil "Putar lagu dulu ♪" | ☐ | ☐ |
+
+## Pemutaran
+
+| Skenario | Yang diharapkan | macOS | Windows |
+|---|---|---|---|
+| Putar lagu populer | "Nyari lirik…" lalu lirik muncul; baris aktif terisi kuning dari kiri seirama | ☐ | ☐ |
+| Ganti lagu (next/prev) | Lirik berganti ≤ ~1–2 dtk; tidak pernah menampilkan lirik lagu sebelumnya | ☐ | ☐ |
+| Kembali ke lagu sebelumnya | Lirik langsung muncul (cache), tanpa "Nyari lirik…" lama | ☐ | ☐ |
+| Seek maju | Baris lompat ke posisi baru ≤ ~1 dtk | ☐ | ☐ |
+| Seek mundur | Sama seperti di atas | ☐ | ☐ |
+| Pause | Lirik meredup dan berhenti bergerak | ☐ | ☐ |
+| Resume setelah pause lama (> 30 dtk) | Lanjut dari posisi yang benar (tidak loncat ke depan) | ☐ | ☐ |
+| Lagu tanpa lirik sinkron (mis. lagu indie/instrumental) | "Lirik sinkron nggak ketemu" + judul — artis | ☐ | ☐ |
+| Judul dengan "- Remastered"/"(feat. …)" | Tetap ketemu lewat fallback search | ☐ | ☐ |
+| Lagu berlirik Jepang/Korea/Mandarin | Huruf tampil benar (bukan kotak) | ☐ | ☐ |
+| Windows: Spotify Web / YouTube Music di Chrome/Edge (Spotify desktop ditutup) | Terbaca; `src` di debug = Chrome/MSEdge | – | ☐ |
+| Windows: Spotify desktop + YouTube di browser bersamaan | Spotify desktop diprioritaskan | – | ☐ |
+
+## Jaringan
+
+| Skenario | Yang diharapkan | macOS | Windows |
+|---|---|---|---|
+| Offline (Wi-Fi mati) lalu putar lagu baru | "Gagal konek ke server lirik"; app tidak crash | ☐ | ☐ |
+| Online lagi | Dalam ≤ 30 dtk lirik muncul sendiri (retry otomatis) | ☐ | ☐ |
+| Jaringan kantor / lrclib.net diblok firewall | Status error jaringan; pesan error lengkap ada di log | ☐ | ☐ |
+| Pakai proxy (`HTTPS_PROXY`) | Lirik tetap ketemu; env proxy tercatat di log (tanpa password) | ☐ | ☐ |
+
+## Window
+
+| Skenario | Yang diharapkan | macOS | Windows |
+|---|---|---|---|
+| Posisi awal (tanpa setting) | Tengah bawah monitor utama | ☐ | ☐ |
+| Drag panel | Window pindah; editor tidak kehilangan fokus (Windows) | ☐ | ☐ |
+| Restart app | Posisi, offset, click-through, debug tetap seperti sebelumnya | ☐ | ☐ |
+| Mengetik di editor sambil lirik jalan | Fokus tetap di editor | ☐ | ☐ |
+| App lain full-screen (VS Code/browser full-screen, video) | Lirik tetap di atas (kalau tidak: catat sebagai known issue) | ☐ | ☐ |
+| Pindah Space/desktop virtual | Lirik ikut di semua Space/desktop | ☐ | ☐ |
+| Multi monitor: drag ke monitor kedua, restart | Muncul lagi di monitor kedua | ☐ | ☐ |
+| Windows: Alt+Tab | MiniLyrics tidak muncul di daftar | – | ☐ |
+| macOS: Cmd+Tab | MiniLyrics tidak muncul di daftar | ☐ | – |
+| Latar transparan | Hanya kotak rounded semi-transparan yang terlihat, sisanya tembus pandang | ☐ | ☐ |
+
+## Tray
+
+| Skenario | Yang diharapkan | macOS | Windows |
+|---|---|---|---|
+| Sembunyikan lirik | Tidak ada yang tergambar; klik tembus ke bawah | ☐ | ☐ |
+| Tampilkan lirik (setelah disembunyikan lama) | Muncul lagi | ☐ | ☐ |
+| Click-through on | Klik di area lirik mengenai window di bawahnya; drag tidak bisa | ☐ | ☐ |
+| Click-through off | Bisa drag lagi | ☐ | ☐ |
+| Lirik lebih cepat 0,5 dtk ×2 | Label offset "+1,0 dtk"; lirik maju | ☐ | ☐ |
+| Lirik lebih lambat 0,5 dtk | Label offset berkurang 0,5 | ☐ | ☐ |
+| Reset offset | Label "+0,0 dtk" | ☐ | ☐ |
+| Mode debug on/off | Overlay muncul di bawah lirik / hilang; window tidak keluar layar | ☐ | ☐ |
+| Buka folder log | Explorer/Finder terbuka di folder log berisi `mini-lyrics.log` | ☐ | ☐ |
+| Keluar | App tertutup, ikon tray hilang | ☐ | ☐ |
+
+## Ketahanan
+
+| Skenario | Yang diharapkan | macOS | Windows |
+|---|---|---|---|
+| Tutup Spotify saat lagu diputar | "Putar lagu dulu ♪"; tidak crash | ☐ | ☐ |
+| Buka Spotify lagi | Lirik muncul lagi tanpa restart app | ☐ | ☐ |
+| Biarkan jalan > 1 jam | Tidak crash; log tidak lebih dari ~2 MB total | ☐ | ☐ |
+| Sleep/wake laptop | Lirik tetap jalan setelah bangun | ☐ | ☐ |
