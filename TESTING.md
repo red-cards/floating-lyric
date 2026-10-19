@@ -64,6 +64,27 @@ Tips umum:
 | macOS: Cmd+Tab | MiniLyrics tidak muncul di daftar | ☐ | – |
 | Latar transparan | Hanya kotak rounded semi-transparan yang terlihat, sisanya tembus pandang | ☐ | ☐ |
 
+## Mode Notch
+
+| Skenario | Yang diharapkan | macOS | Windows |
+|---|---|---|---|
+| Tray → Tampilan: Notch | Centang pindah (seperti radio); window pindah ke tengah atas | ☐ | ☐ |
+| Mac ber-notch, tidak ada lagu / pause | Bentuk hitam menyatu dengan notch kamera (tidak terlihat beda) | ☐ | – |
+| Mac ber-notch, lagu diputar | Bentuk memanjang ke bawah dengan animasi; 1 baris lirik di bawah area kamera, area kamera kosong | ☐ | – |
+| Sudut bentuk notch | Sudut atas melengkung ke luar (inverse fillet) menyatu dengan tepi atas, sudut bawah membulat | ☐ | – |
+| Posisi di atas menu bar | Bentuk menempel ke tepi atas layar, tidak terdorong ke bawah menu bar (cek log kalau ada `di-constrain`) | ☐ | – |
+| Layar tanpa notch / Windows | Pill hitam kecil di tengah atas; memanjang saat lagu diputar | ☐ | ☐ |
+| Pause → play → pause | Collapsed/expanded dengan animasi tinggi + fade teks | ☐ | ☐ |
+| Click-through default | Langsung aktif di mode Notch; klik menu bar/tab di bawahnya tembus | ☐ | ☐ |
+| Kursor masuk area panel | Panel & teks meredup; keluar → normal lagi | ☐ | ☐ |
+| Mac + monitor eksternal (tanpa notch) | Tetap tampil di layar MacBook (yang ber-notch) | ☐ | – |
+| Clamshell / hanya monitor eksternal | Pill di layar utama | ☐ | – |
+| Windows multi monitor | Pill di monitor utama | – | ☐ |
+| Mode debug di mode Notch | Overlay muncul di bawah bentuk | ☐ | ☐ |
+| Kembali ke Tampilan: Panel bawah | Panel kembali ke posisi tersimpan; click-through panel tidak ikut berubah | ☐ | ☐ |
+| Restart app | Mode tampilan tetap seperti sebelumnya | ☐ | ☐ |
+| `MINI_LYRICS_FAKE_NOTCH=185x32` (+ `MINI_LYRICS_DEMO=1`) | Bentuk notch tampil di layar tanpa notch | ☐ | ☐ |
+
 ## Tray
 
 | Skenario | Yang diharapkan | macOS | Windows |

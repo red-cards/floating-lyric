@@ -18,6 +18,9 @@ log = "0.4"
 simplelog = "0.12"
 directories = "6"
 raw-window-handle = "0.6"
+# Versi yang sama dengan yang dipakai eframe; untuk monitor & posisi window
+# (dan ActivationPolicy di macOS).
+winit = { version = "0.30", default-features = false }
 
 [target.'cfg(any(windows, target_os = "macos"))'.dependencies]
 # Menu tray memakai muda lewat re-export `tray_icon::menu`, supaya versinya
@@ -25,11 +28,9 @@ raw-window-handle = "0.6"
 tray-icon = "0.26"
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.62", features = ["Media_Control", "Foundation", "Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_WinRT"] }
+windows = { version = "0.62", features = ["Media_Control", "Foundation", "Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_WinRT", "Win32_Graphics_Gdi"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-# Versi yang sama dengan yang dipakai eframe; hanya untuk ActivationPolicy.
-winit = { version = "0.30", default-features = false }
 objc2 = "0.6"
 objc2-foundation = "0.3"
-objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSApplication", "NSResponder", "NSView", "NSRunningApplication"] }
+objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSApplication", "NSResponder", "NSView", "NSRunningApplication", "NSScreen", "NSEvent"] }

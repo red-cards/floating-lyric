@@ -10,9 +10,10 @@ use mini_lyrics_core::karaoke;
 use mini_lyrics_core::lrclib::LrclibClient;
 use mini_lyrics_core::{FetchOutcome, LyricsController, LyricsProvider, LyricsStatus, TrackQuery};
 
+use crate::notch::{self, Kind};
 use crate::now_playing::{self, SharedNowPlaying};
 use crate::os_window;
-use crate::settings::{Paths, Settings};
+use crate::settings::{DisplayMode, Paths, Settings};
 use crate::tray::{self, Tray, TrayAction};
 
 pub const WIDTH: f32 = 560.0;
@@ -23,6 +24,19 @@ const HIGHLIGHT: Color32 = Color32::from_rgb(0xFF, 0xD6, 0x4D);
 const ACTIVE_SIZE: f32 = 22.0;
 const SIDE_SIZE: f32 = 14.0;
 const PANEL_ALPHA: f32 = 0.55;
+/// Ukuran teks satu baris di mode notch.
+const NOTCH_TEXT_SIZE: f32 = 17.0;
+/// Opacity panel saat kursor berada di atasnya (supaya yang di bawah terlihat).
+const HOVER_ALPHA: f32 = 0.3;
+/// Seberapa sering posisi/layar target mode notch dicek ulang.
+const TOP_RECHECK: Duration = Duration::from_secs(2);
+
+/// Tata letak window yang sedang diterapkan.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Layout {
+    Panel { debug: bool },
+    Notch { kind: Kind, debug: bool },
+}
 
 pub fn window_size(debug: bool) -> egui::Vec2 {
     vec2(
@@ -64,7 +78,15 @@ pub struct MiniLyricsApp {
     /// Jumlah frame lagi sampai penyesuaian window native diterapkan ulang.
     os_apply_in: Option<u8>,
     applied_passthrough: Option<bool>,
-    applied_debug_size: Option<bool>,
+    applied_layout: Option<Layout>,
+    /// Bentuk mode notch (notch asli atau pill), dicek ulang berkala.
+    notch_kind: Kind,
+    last_top_check: Option<Instant>,
+    /// Posisi kursor relatif window (dibaca global, karena saat passthrough
+    /// event mouse tidak sampai ke window).
+    cursor: Option<Pos2>,
+    /// Jangan simpan posisi panel sampai waktu ini (habis ganti layout).
+    suppress_pos_save_until: Option<Instant>,
     /// Posisi window sudah diatur (dari setting atau default).
     positioned: bool,
     position_attempts: u32,
@@ -101,7 +123,11 @@ impl MiniLyricsApp {
             tray_tried: false,
             os_apply_in: Some(0),
             applied_passthrough: None,
-            applied_debug_size: None,
+            applied_layout: None,
+            notch_kind: Kind::Pill,
+            last_top_check: None,
+            cursor: None,
+            suppress_pos_save_until: None,
             position_attempts: 0,
             last_moved: None,
         }
@@ -149,7 +175,7 @@ impl MiniLyricsApp {
         // JANGAN pakai ViewportCommand::Visible(false): update() bisa berhenti
         // dipanggil sehingga menu tray tidak terbaca. "Sembunyi" = tidak
         // menggambar apa pun + mouse passthrough.
-        let passthrough = self.settings.hidden || self.settings.click_through;
+        let passthrough = self.settings.hidden || self.settings.click_through();
         if self.applied_passthrough != Some(passthrough) {
             ctx.send_viewport_cmd(ViewportCommand::MousePassthrough(passthrough));
             self.applied_passthrough = Some(passthrough);
@@ -157,22 +183,9 @@ impl MiniLyricsApp {
             self.os_apply_in = Some(2);
         }
 
-        if self.applied_debug_size != Some(self.settings.debug) {
-            let size = window_size(self.settings.debug);
-            ctx.send_viewport_cmd(ViewportCommand::InnerSize(size));
-            // Overlay debug memanjangkan window ke bawah; geser ke atas kalau
-            // jadi keluar layar (hanya bisa dicek di monitor utama).
-            let (outer, monitor) =
-                ctx.input(|i| (i.viewport().outer_rect, i.viewport().monitor_size));
-            if let (Some(outer), Some(m)) = (outer, monitor) {
-                let on_primary =
-                    (0.0..m.x).contains(&outer.min.x) && (0.0..m.y).contains(&outer.min.y);
-                if self.applied_debug_size.is_some() && on_primary && outer.min.y + size.y > m.y {
-                    let y = (m.y - size.y - 40.0).max(0.0);
-                    ctx.send_viewport_cmd(ViewportCommand::OuterPosition(pos2(outer.min.x, y)));
-                }
-            }
-            self.applied_debug_size = Some(self.settings.debug);
+        match self.settings.display_mode {
+            DisplayMode::Panel => self.sync_panel_layout(ctx),
+            DisplayMode::Notch => self.sync_notch_layout(frame),
         }
 
         if let Some(n) = self.os_apply_in {
@@ -194,6 +207,9 @@ impl MiniLyricsApp {
             )
         });
 
+        if self.settings.display_mode != DisplayMode::Panel {
+            return;
+        }
         if !self.positioned {
             // Default: tengah bawah monitor utama.
             self.position_attempts += 1;
@@ -211,6 +227,12 @@ impl MiniLyricsApp {
         }
 
         // Simpan posisi setelah window selesai di-drag.
+        if self
+            .suppress_pos_save_until
+            .is_some_and(|until| Instant::now() < until)
+        {
+            return;
+        }
         if let Some(outer) = outer {
             let cur = [outer.min.x, outer.min.y];
             let moved = self
@@ -229,6 +251,93 @@ impl MiniLyricsApp {
             }
         }
     }
+
+    fn sync_panel_layout(&mut self, ctx: &egui::Context) {
+        let layout = Layout::Panel {
+            debug: self.settings.debug,
+        };
+        if self.applied_layout == Some(layout) {
+            return;
+        }
+        let size = window_size(self.settings.debug);
+        ctx.send_viewport_cmd(ViewportCommand::InnerSize(size));
+        match self.applied_layout {
+            // Kembali dari mode notch: pulihkan posisi panel tersimpan.
+            Some(Layout::Notch { .. }) => match self.settings.window_pos {
+                Some([x, y]) => ctx.send_viewport_cmd(ViewportCommand::OuterPosition(pos2(x, y))),
+                None => {
+                    self.positioned = false;
+                    self.position_attempts = 0;
+                }
+            },
+            // Debug on/off: overlay memanjangkan window ke bawah; geser ke
+            // atas kalau jadi keluar layar (hanya bisa dicek di monitor utama).
+            Some(Layout::Panel { .. }) => {
+                let (outer, monitor) =
+                    ctx.input(|i| (i.viewport().outer_rect, i.viewport().monitor_size));
+                if let (Some(outer), Some(m)) = (outer, monitor) {
+                    let on_primary =
+                        (0.0..m.x).contains(&outer.min.x) && (0.0..m.y).contains(&outer.min.y);
+                    if on_primary && outer.min.y + size.y > m.y {
+                        let y = (m.y - size.y - 40.0).max(0.0);
+                        ctx.send_viewport_cmd(ViewportCommand::OuterPosition(pos2(outer.min.x, y)));
+                    }
+                }
+            }
+            None => {}
+        }
+        self.suppress_pos_save_until = Some(Instant::now() + Duration::from_secs(1));
+        self.applied_layout = Some(layout);
+    }
+
+    fn sync_notch_layout(&mut self, frame: &eframe::Frame) {
+        let due = self
+            .last_top_check
+            .is_none_or(|t| t.elapsed() >= TOP_RECHECK);
+        let was_notch = matches!(self.applied_layout, Some(Layout::Notch { .. }));
+        if !due && was_notch {
+            if let Some(Layout::Notch { debug, .. }) = self.applied_layout {
+                if debug == self.settings.debug {
+                    return;
+                }
+            }
+        }
+        self.last_top_check = Some(Instant::now());
+
+        // Layar bisa berganti (monitor dicolok/dicabut), jadi cek ulang.
+        let kind = Kind::from_metrics(notch::fake_from_env().or_else(os_window::notch_metrics));
+        if kind != self.notch_kind || !was_notch {
+            log::info!("mode notch: {kind:?}");
+        }
+        self.notch_kind = kind;
+        let layout = Layout::Notch {
+            kind,
+            debug: self.settings.debug,
+        };
+        let size = kind.window_size(self.debug_height());
+        if let Some(w) = frame.winit_window() {
+            os_window::place_top(w.as_ref(), size, kind.top_margin());
+        }
+        if self.applied_layout != Some(layout) {
+            // Level/collection behavior dipastikan lagi setelah pindah.
+            self.os_apply_in = Some(1);
+        }
+        self.applied_layout = Some(layout);
+    }
+
+    fn debug_height(&self) -> f32 {
+        if self.settings.debug {
+            DEBUG_HEIGHT
+        } else {
+            0.0
+        }
+    }
+
+    /// Efek redup saat kursor di atas panel hanya berlaku kalau event mouse
+    /// tidak diterima (click-through) atau di mode notch.
+    fn dims_on_hover(&self) -> bool {
+        self.settings.display_mode == DisplayMode::Notch || self.settings.click_through()
+    }
 }
 
 impl eframe::App for MiniLyricsApp {
@@ -244,9 +353,23 @@ impl eframe::App for MiniLyricsApp {
         let player = self.now_playing.lock().ok().and_then(|s| s.player.clone());
         self.lyrics.update(player.as_ref(), Instant::now());
 
+        self.cursor = if self.dims_on_hover() && !self.settings.hidden {
+            frame
+                .winit_window()
+                .and_then(|w| os_window::cursor_in_window(w.as_ref()))
+        } else {
+            None
+        };
+
         let playing = player.as_ref().is_some_and(|p| p.is_playing);
+        let idle = if self.dims_on_hover() {
+            // Kursor dicek dengan polling, jadi jangan terlalu jarang.
+            100
+        } else {
+            250
+        };
         let animate = playing && !self.settings.hidden;
-        ctx.request_repaint_after(Duration::from_millis(if animate { 16 } else { 250 }));
+        ctx.request_repaint_after(Duration::from_millis(if animate { 16 } else { idle }));
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -259,6 +382,43 @@ impl eframe::App for MiniLyricsApp {
             .lock()
             .map(|s| s.clone())
             .unwrap_or_default();
+        let debug_top = match self.settings.display_mode {
+            DisplayMode::Panel => {
+                self.ui_panel(ui, &np, now);
+                LYRICS_HEIGHT
+            }
+            DisplayMode::Notch => {
+                self.ui_notch(ui, &np, now);
+                self.notch_kind.window_size(0.0).y
+            }
+        };
+        if self.settings.debug {
+            self.draw_debug(ui, &np, now, debug_top);
+        }
+    }
+
+    fn save(&mut self, _storage: &mut dyn eframe::Storage) {
+        self.save_settings();
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        log::info!("keluar");
+        self.save_settings();
+    }
+}
+
+impl MiniLyricsApp {
+    /// Opacity tambahan dari efek redup saat kursor di atas `area`.
+    fn hover_alpha(&self, ui: &egui::Ui, area: Rect) -> f32 {
+        let hovered = self.cursor.is_some_and(|c| area.contains(c));
+        let t = ui
+            .ctx()
+            .animate_bool_with_time(ui.scope_id().with("hover-dim"), hovered, 0.15);
+        1.0 + (HOVER_ALPHA - 1.0) * t
+    }
+
+    /// Mode "Panel bawah": 3 baris, bisa di-drag.
+    fn ui_panel(&self, ui: &egui::Ui, np: &now_playing::NowPlaying, now: Instant) {
         let player = np.player.as_ref();
         let view = self.lyrics.view();
 
@@ -267,11 +427,12 @@ impl eframe::App for MiniLyricsApp {
         let painter = ui.painter().with_clip_rect(panel);
 
         let paused = player.is_some_and(|p| !p.is_playing);
-        let dim = if paused { 0.5 } else { 1.0 };
+        let hover = self.hover_alpha(ui, panel);
+        let dim = if paused { 0.5 } else { 1.0 } * hover;
         painter.rect_filled(
             panel,
             CornerRadius::same(14),
-            Color32::from_black_alpha((PANEL_ALPHA * 255.0) as u8),
+            Color32::from_black_alpha((PANEL_ALPHA * hover * 255.0) as u8),
         );
 
         // Drag: tekan tombol kiri di panel → biarkan OS memindahkan window.
@@ -315,7 +476,7 @@ impl eframe::App for MiniLyricsApp {
                     max_w,
                     "Putar lagu dulu ♪",
                     18.0,
-                    white(0.85),
+                    white(0.85 * hover),
                 );
             }
             (Some(p), LyricsStatus::Ready(lines)) => {
@@ -326,7 +487,15 @@ impl eframe::App for MiniLyricsApp {
                 }
                 match f.current {
                     Some(text) if !text.trim().is_empty() => {
-                        draw_karaoke(&painter, pos2(cx, y_cur), max_w, text, f.progress, dim);
+                        draw_karaoke(
+                            &painter,
+                            pos2(cx, y_cur),
+                            max_w,
+                            text,
+                            ACTIVE_SIZE,
+                            f.progress,
+                            dim,
+                        );
                     }
                     _ => {
                         let label = if f.current.is_none() {
@@ -367,27 +536,83 @@ impl eframe::App for MiniLyricsApp {
                 }
             }
         }
+    }
 
-        if self.settings.debug {
-            self.draw_debug(ui, &np, now);
+    /// Mode "Notch": bentuk notch (atau pill) hitam di tengah atas, satu
+    /// baris lirik di bawah area kamera, collapsed/expanded dengan animasi.
+    fn ui_notch(&self, ui: &egui::Ui, np: &now_playing::NowPlaying, now: Instant) {
+        let player = np.player.as_ref();
+        let kind = self.notch_kind;
+        let full = ui.ctx().content_rect();
+        let lyrics_area =
+            Rect::from_min_size(full.min, vec2(full.width(), kind.window_size(0.0).y));
+        let painter = ui.painter().with_clip_rect(lyrics_area);
+
+        // Expanded selama ada lagu yang diputar; pause/tanpa lagu → collapsed.
+        let expanded = player.is_some_and(|p| p.is_playing);
+        let t = ui
+            .ctx()
+            .animate_bool_with_time(ui.scope_id().with("notch-expand"), expanded, 0.35);
+        let body = kind.body_rect(full.min, full.width(), t);
+        let hover = self.hover_alpha(ui, kind.hit_rect(body));
+        let color = Color32::from_black_alpha((255.0 * hover) as u8);
+        match kind {
+            Kind::Notch(_) => {
+                notch::paint_notch(&painter, body, notch::notch_bottom_radius(t), color)
+            }
+            Kind::Pill => notch::paint_pill(&painter, body, color),
+        }
+
+        let alpha = notch::text_alpha(t) * hover;
+        if alpha <= 0.01 {
+            return;
+        }
+        let Some(p) = player else {
+            return;
+        };
+        // Area kamera dibiarkan kosong: teks hanya di bawahnya.
+        let text_rect = kind.text_rect(body);
+        let painter = painter.with_clip_rect(text_rect.intersect(lyrics_area));
+        let center = text_rect.center();
+        let max_w = text_rect.width();
+        let view = self.lyrics.view();
+        match &view.status {
+            LyricsStatus::Ready(lines) => {
+                let pos = p.position_at(now) + self.settings.offset_secs;
+                let f = karaoke::frame_at(lines, pos);
+                match f.current {
+                    Some(text) if !text.trim().is_empty() => draw_karaoke(
+                        &painter,
+                        center,
+                        max_w,
+                        text,
+                        NOTCH_TEXT_SIZE,
+                        f.progress,
+                        alpha,
+                    ),
+                    // Sebelum baris pertama / jeda: tampilkan baris berikutnya redup.
+                    _ => {
+                        let label = f.next.filter(|n| !n.trim().is_empty()).unwrap_or("♪");
+                        draw_line(&painter, center, max_w, label, 15.0, white(0.55 * alpha));
+                    }
+                }
+            }
+            status => {
+                let msg = match status {
+                    LyricsStatus::NotFound => "Lirik sinkron nggak ketemu",
+                    LyricsStatus::NetworkError(_) => "Gagal konek ke server lirik",
+                    _ => "Nyari lirik…",
+                };
+                let label = format!("{msg} · {}", p.title);
+                draw_line(&painter, center, max_w, &label, 14.0, white(0.8 * alpha));
+            }
         }
     }
 
-    fn save(&mut self, _storage: &mut dyn eframe::Storage) {
-        self.save_settings();
-    }
-
-    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        log::info!("keluar");
-        self.save_settings();
-    }
-}
-
-impl MiniLyricsApp {
-    fn draw_debug(&self, ui: &egui::Ui, np: &now_playing::NowPlaying, now: Instant) {
+    fn draw_debug(&self, ui: &egui::Ui, np: &now_playing::NowPlaying, now: Instant, top: f32) {
         let full = ui.ctx().content_rect();
         let rect = Rect::from_min_max(
-            pos2(full.min.x + 2.0, full.min.y + LYRICS_HEIGHT + 2.0),
+            pos2(full.min.x + 2.0, full.min.y + top + 2.0),
             full.max - vec2(2.0, 2.0),
         );
         let painter = ui.painter().with_clip_rect(rect);
@@ -491,8 +716,16 @@ fn draw_line(painter: &Painter, center: Pos2, max_w: f32, text: &str, size: f32,
 
 /// Baris aktif dengan efek karaoke: teks putih redup, lalu teks kuning yang
 /// di-clip dari kiri selebar `progress`.
-fn draw_karaoke(painter: &Painter, center: Pos2, max_w: f32, text: &str, progress: f32, dim: f32) {
-    let size = fitted_size(painter, text, ACTIVE_SIZE, max_w);
+fn draw_karaoke(
+    painter: &Painter,
+    center: Pos2,
+    max_w: f32,
+    text: &str,
+    size: f32,
+    progress: f32,
+    dim: f32,
+) {
+    let size = fitted_size(painter, text, size, max_w);
     let font = FontId::proportional(size);
     let base_color = white(0.55 * dim);
     let fill_color = with_alpha(HIGHLIGHT, dim);

@@ -45,15 +45,35 @@ tanpa Node/web), jalan di **macOS** dan **Windows**.
 | Menu | Fungsi |
 |---|---|
 | `MiniLyrics v… (sha)` | Versi + commit build (untuk laporan bug) |
+| Tampilan: Panel bawah / Notch | Pilih mode tampilan (lihat di bawah); tersimpan di setting |
 | Sembunyikan/Tampilkan lirik | Window tetap ada tapi tidak menggambar apa pun & tembus klik |
-| Click-through | Klik tembus ke window di bawahnya (tidak bisa di-drag) |
+| Click-through | Klik tembus ke window di bawahnya (tidak bisa di-drag). Disimpan terpisah per mode; mode Notch default aktif |
 | Lirik lebih cepat / lebih lambat 0,5 dtk, Reset offset | Koreksi sinkron |
 | Mode debug | Overlay info: sumber, posisi mentah/interpolasi, offset, status & latency LRCLIB, umur sampel |
 | Buka folder log | Buka folder log di Explorer/Finder |
 | Keluar | |
 
 Window bisa dipindah dengan drag (tombol kiri) di panel lirik. Posisi, offset,
-click-through, dan mode debug tersimpan otomatis.
+click-through, mode tampilan, dan mode debug tersimpan otomatis.
+
+### Mode tampilan
+
+- **Panel bawah** (default): panel semi-transparan 3 baris (sebelumnya, aktif,
+  berikutnya), bisa di-drag, posisi tersimpan.
+- **Notch**: satu baris lirik yang "keluar" dari notch, ala Dynamic Island.
+  - **Mac ber-notch:** bentuk hitam pekat digambar persis di atas notch kamera
+    (sudut atas inverse fillet, sudut bawah membulat) di tengah atas layar, di
+    atas menu bar. Saat lagu diputar bentuknya memanjang ke bawah (animasi
+    tinggi + fade) dan lirik tampil di bawah area kamera; saat pause/tidak ada
+    lagu kembali collapsed menyatu dengan notch.
+  - **Layar tanpa notch & Windows:** pill hitam di tengah atas dengan perilaku
+    yang sama (collapsed = pill kecil).
+  - Click-through aktif secara default. Saat kursor masuk area panel, panel
+    meredup supaya yang di bawahnya (menu bar, tab browser) tetap terlihat.
+  - Multi monitor: tampil di layar yang punya notch; kalau tidak ada, di layar
+    utama. Posisi dicek ulang tiap 2 detik (colok/cabut monitor).
+  - Ngetes bentuk notch di layar tanpa notch:
+    `MINI_LYRICS_FAKE_NOTCH=185x32` (lebar x tinggi, points).
 
 ### Lokasi file
 
@@ -90,6 +110,7 @@ atau firewall kantor).
 ```sh
 cargo run -p mini-lyrics                 # jalankan (debug)
 MINI_LYRICS_DEMO=1 cargo run -p mini-lyrics   # mode demo: lagu & lirik palsu, tanpa Spotify/jaringan
+MINI_LYRICS_FAKE_NOTCH=185x32 cargo run -p mini-lyrics   # paksa bentuk notch (mode Notch)
 cargo test --workspace                   # semua test (core juga jalan di Linux)
 cargo test -p mini-lyrics-core           # test logika inti saja
 cargo build --release -p mini-lyrics     # binary rilis di target/release/
@@ -112,7 +133,8 @@ Commit pendek yang tampil di tray disuntikkan oleh `crates/app/build.rs`
 | `crates/app/src/ui.rs` | UI egui: panel, 3 baris, karaoke, status, drag, overlay debug |
 | `crates/app/src/now_playing/` | Thread poller 1 dtk; `macos.rs` (osascript), `windows.rs` (SMTC), `demo.rs` |
 | `crates/app/src/tray.rs` | Ikon (RGBA dari kode) & menu tray |
-| `crates/app/src/os_window.rs` | NSWindow (macOS) / extended style HWND (Windows) |
+| `crates/app/src/notch.rs` | Geometri, path bentuk notch/pill, easing animasi mode Notch |
+| `crates/app/src/os_window.rs` | NSWindow (macOS) / extended style HWND (Windows), deteksi notch (`NSScreen.safeAreaInsets`, `auxiliaryTopLeft/RightArea`), penempatan tengah atas, posisi kursor global |
 | `crates/app/src/fonts.rs` | Font fallback sistem untuk CJK & simbol |
 | `crates/app/src/settings.rs`, `logging.rs` | Setting JSON, log berotasi |
 | `scripts/bundle-macos.sh` | Susun `MiniLyrics.app` + Info.plist + codesign ad-hoc |
@@ -144,6 +166,15 @@ saat playing dan ~250 ms saat idle.
   tapi klik/drag di panel bisa mengaktifkan MiniLyrics sesaat sehingga editor
   kehilangan fokus. Pakai click-through kalau mengganggu.
 - **macOS – hanya Spotify desktop** yang dibaca (Apple Music/browser belum).
+- **Mode Notch – macOS:** window diletakkan lewat `NSWindow setFrame:display:`
+  di atas menu bar (level `NSStatusWindowLevel` > `NSMainMenuWindowLevel`). Kalau
+  macOS tetap memaksa frame turun ke bawah menu bar, log mencatat
+  `frame window di-constrain` beserta frame yang diminta & yang didapat.
+  Deteksi notch butuh macOS 12+; di macOS 11 otomatis jadi pill.
+- **Mode Notch – Windows:** pill di tengah atas monitor utama bisa menutupi
+  bagian atas window yang dimaximize (tab/judul); click-through (default aktif)
+  membuat klik tetap tembus. Kalau click-through dimatikan, area transparan di
+  sekitar pill ikut menahan klik.
 - **Windows – Spotify & posisi:** Spotify jarang memperbarui posisi di SMTC, jadi
   posisi dihitung dari `LastUpdatedTime`. Kalau resume dari pause tanpa update
   timeline, app memakai patokan posisi saat pause (akurasi ±0,5 dtk). Pakai

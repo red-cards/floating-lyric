@@ -3,6 +3,7 @@
 
 mod fonts;
 mod logging;
+mod notch;
 mod now_playing;
 mod os_window;
 mod settings;
@@ -49,7 +50,10 @@ fn main() {
         .with_resizable(false)
         // Jangan mencuri fokus dari editor.
         .with_active(false);
-    if let Some([x, y]) = settings.window_pos {
+    // Mode notch ditempatkan sendiri di frame pertama (tengah atas layar).
+    if let (settings::DisplayMode::Panel, Some([x, y])) =
+        (settings.display_mode, settings.window_pos)
+    {
         viewport = viewport.with_position([x, y]);
     }
 
