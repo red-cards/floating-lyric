@@ -7,10 +7,12 @@
 //! Tray harus dibuat SETELAH event loop berjalan (wajib di macOS), jadi
 //! [`Tray::new`] dipanggil dari frame pertama, bukan dari `main`.
 
-use crate::settings::Settings;
+use crate::settings::{DisplayMode, Settings};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayAction {
+    ModePanel,
+    ModeNotch,
     ToggleHidden,
     ToggleClickThrough,
     OffsetEarlier,
@@ -60,10 +62,12 @@ mod imp {
     use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 
     use super::{icon_rgba, offset_label, TrayAction};
-    use crate::settings::Settings;
+    use crate::settings::{DisplayMode, Settings};
 
     pub struct Tray {
         _icon: TrayIcon,
+        mode_panel: CheckMenuItem,
+        mode_notch: CheckMenuItem,
         hide: MenuItem,
         click_through: CheckMenuItem,
         offset: MenuItem,
@@ -76,9 +80,12 @@ mod imp {
             let err = |e: &dyn std::fmt::Display| format!("tray: {e}");
             let menu = Menu::new();
             let version = MenuItem::new(version_label, false, None);
+            let notch = settings.display_mode == DisplayMode::Notch;
+            let mode_panel = CheckMenuItem::new("Tampilan: Panel bawah", true, !notch, None);
+            let mode_notch = CheckMenuItem::new("Tampilan: Notch", true, notch, None);
             let hide = MenuItem::new(hide_text(settings.hidden), true, None);
             let click_through =
-                CheckMenuItem::new("Click-through", true, settings.click_through, None);
+                CheckMenuItem::new("Click-through", true, settings.click_through(), None);
             let earlier = MenuItem::new("Lirik lebih cepat 0,5 dtk", true, None);
             let later = MenuItem::new("Lirik lebih lambat 0,5 dtk", true, None);
             let reset = MenuItem::new("Reset offset", true, None);
@@ -90,6 +97,9 @@ mod imp {
             let sep = PredefinedMenuItem::separator;
             menu.append_items(&[
                 &version,
+                &sep(),
+                &mode_panel,
+                &mode_notch,
                 &sep(),
                 &hide,
                 &click_through,
@@ -116,6 +126,8 @@ mod imp {
                 .map_err(|e| err(&e))?;
 
             let actions = vec![
+                (mode_panel.id().clone(), TrayAction::ModePanel),
+                (mode_notch.id().clone(), TrayAction::ModeNotch),
                 (hide.id().clone(), TrayAction::ToggleHidden),
                 (click_through.id().clone(), TrayAction::ToggleClickThrough),
                 (earlier.id().clone(), TrayAction::OffsetEarlier),
@@ -127,6 +139,8 @@ mod imp {
             ];
             Ok(Self {
                 _icon: tray,
+                mode_panel,
+                mode_notch,
                 hide,
                 click_through,
                 offset,
@@ -148,8 +162,13 @@ mod imp {
 
         /// Samakan teks/centang menu dengan setting.
         pub fn sync(&self, settings: &Settings) {
+            let notch = settings.display_mode == DisplayMode::Notch;
+            // CheckMenuItem membalik centang sendiri saat diklik; samakan lagi
+            // supaya berperilaku seperti radio.
+            self.mode_panel.set_checked(!notch);
+            self.mode_notch.set_checked(notch);
             self.hide.set_text(hide_text(settings.hidden));
-            self.click_through.set_checked(settings.click_through);
+            self.click_through.set_checked(settings.click_through());
             self.offset.set_text(offset_label(settings.offset_secs));
             self.debug.set_checked(settings.debug);
         }
@@ -188,8 +207,10 @@ pub use imp::Tray;
 /// Terapkan aksi tray ke setting. Mengembalikan `true` kalau setting berubah.
 pub fn apply_to_settings(action: TrayAction, s: &mut Settings) -> bool {
     match action {
+        TrayAction::ModePanel => s.display_mode = DisplayMode::Panel,
+        TrayAction::ModeNotch => s.display_mode = DisplayMode::Notch,
         TrayAction::ToggleHidden => s.hidden = !s.hidden,
-        TrayAction::ToggleClickThrough => s.click_through = !s.click_through,
+        TrayAction::ToggleClickThrough => s.toggle_click_through(),
         TrayAction::OffsetEarlier => s.offset_secs = round_offset(s.offset_secs + 0.5),
         TrayAction::OffsetLater => s.offset_secs = round_offset(s.offset_secs - 0.5),
         TrayAction::ResetOffset => s.offset_secs = 0.0,
@@ -218,6 +239,19 @@ mod tests {
         apply_to_settings(TrayAction::ResetOffset, &mut s);
         assert_eq!(s.offset_secs, 0.0);
         assert_eq!(offset_label(-0.5), "Offset: -0,5 dtk");
+    }
+
+    #[test]
+    fn mode_and_click_through_actions() {
+        let mut s = Settings::default();
+        apply_to_settings(TrayAction::ModeNotch, &mut s);
+        assert_eq!(s.display_mode, DisplayMode::Notch);
+        assert!(s.click_through());
+        apply_to_settings(TrayAction::ToggleClickThrough, &mut s);
+        assert!(!s.click_through());
+        apply_to_settings(TrayAction::ModePanel, &mut s);
+        assert_eq!(s.display_mode, DisplayMode::Panel);
+        assert!(!s.click_through());
     }
 
     #[test]
