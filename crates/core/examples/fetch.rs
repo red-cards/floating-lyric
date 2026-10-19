@@ -25,7 +25,11 @@ fn main() {
     let started = std::time::Instant::now();
     match client.fetch(&q) {
         FetchOutcome::Found(lines) => {
-            println!("{} baris ({} ms)", lines.len(), started.elapsed().as_millis());
+            println!(
+                "{} baris ({} ms)",
+                lines.len(),
+                started.elapsed().as_millis()
+            );
             for l in lines.iter().take(10) {
                 println!("[{:7.2}] {}", l.time_secs, l.text);
             }
