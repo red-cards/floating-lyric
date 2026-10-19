@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Untuk PR, pakai head commit PR (bukan merge commit) supaya hash di tray
+  # sama dengan yang terlihat di GitHub. Dibaca oleh crates/app/build.rs.
+  MINI_LYRICS_COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  core-linux:
+    name: core (ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo fmt --check
+        run: cargo fmt --all --check
+      - name: cargo clippy (core)
+        run: cargo clippy -p mini-lyrics-core --all-targets -- -D warnings
+      - name: cargo test (core)
+        run: cargo test -p mini-lyrics-core
+
+  windows:
+    name: windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: cargo test
+        run: cargo test --workspace
+      - name: cargo build --release
+        run: cargo build --release -p mini-lyrics
+      - name: Short SHA
+        shell: bash
+        run: echo "SHORT_SHA=${MINI_LYRICS_COMMIT_SHA::7}" >> "$GITHUB_ENV"
+      # GitHub membungkus artifact dalam zip, jadi hasil download adalah
+      # mini-lyrics-windows-<sha>.zip yang berisi mini-lyrics.exe.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mini-lyrics-windows-${{ env.SHORT_SHA }}
+          path: target/release/mini-lyrics.exe
+          if-no-files-found: error
+
+  macos:
+    name: macos
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: cargo test
+        run: cargo test --workspace
+      - name: cargo build --release (universal)
+        run: |
+          cargo build --release -p mini-lyrics --target aarch64-apple-darwin
+          cargo build --release -p mini-lyrics --target x86_64-apple-darwin
+          lipo -create -output target/mini-lyrics-universal \
+            target/aarch64-apple-darwin/release/mini-lyrics \
+            target/x86_64-apple-darwin/release/mini-lyrics
+          lipo -info target/mini-lyrics-universal
+      - name: Bundle MiniLyrics.app
+        run: |
+          SHORT_SHA="${MINI_LYRICS_COMMIT_SHA::7}"
+          echo "SHORT_SHA=$SHORT_SHA" >> "$GITHUB_ENV"
+          scripts/bundle-macos.sh target/mini-lyrics-universal dist
+          # Zip dengan ditto supaya permission & signature bundle utuh.
+          (cd dist && ditto -c -k --keepParent MiniLyrics.app "mini-lyrics-macos-$SHORT_SHA.zip")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mini-lyrics-macos-${{ env.SHORT_SHA }}
+          path: dist/mini-lyrics-macos-${{ env.SHORT_SHA }}.zip
+          if-no-files-found: error
