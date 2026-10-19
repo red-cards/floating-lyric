@@ -292,3 +292,26 @@ pub fn open_folder(path: &std::path::Path) {
         log::warn!("gagal membuka {}: {e}", path.display());
     }
 }
+
+/// Taskbar Windows bertema terang? (untuk memilih versi ikon tray). Default
+/// gelap kalau nilai registry tidak terbaca.
+#[cfg(windows)]
+pub fn taskbar_is_light() -> bool {
+    use windows::core::w;
+    use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
+
+    let mut value: u32 = 0;
+    let mut size = std::mem::size_of::<u32>() as u32;
+    let result = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            w!(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"),
+            w!("SystemUsesLightTheme"),
+            RRF_RT_REG_DWORD,
+            None,
+            Some(&mut value as *mut u32 as *mut core::ffi::c_void),
+            Some(&mut size),
+        )
+    };
+    result.is_ok() && value != 0
+}

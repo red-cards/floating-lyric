@@ -1,33 +1,28 @@
-//! UI lirik melayang (egui).
+//! UI lirik melayang (egui). Gaya visual mode "Panel bawah" mengikuti arah
+//! desain 1a · Kalem; semua tokennya ada di [`crate::theme`].
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use eframe::egui::{
-    self, pos2, vec2, Align2, Color32, CornerRadius, FontId, Painter, Pos2, Rect, Sense,
-    ViewportCommand,
+    self, pos2, text::LayoutJob, vec2, Align2, Color32, CornerRadius, FontId, Galley, Painter,
+    Pos2, Rect, Sense, Shadow, Stroke, StrokeKind, TextFormat, ViewportCommand,
 };
 use mini_lyrics_core::karaoke;
 use mini_lyrics_core::lrclib::LrclibClient;
-use mini_lyrics_core::{FetchOutcome, LyricsController, LyricsProvider, LyricsStatus, TrackQuery};
+use mini_lyrics_core::{
+    FetchOutcome, LyricLine, LyricsController, LyricsProvider, LyricsStatus, LyricsView,
+    PlayerState, TrackQuery,
+};
 
+use crate::fonts;
 use crate::notch::{self, Kind};
 use crate::now_playing::{self, SharedNowPlaying};
 use crate::os_window;
 use crate::settings::{DisplayMode, Paths, Settings};
+use crate::theme::{self, TextStyle, Tint};
 use crate::tray::{self, Tray, TrayAction};
 
-pub const WIDTH: f32 = 560.0;
-pub const LYRICS_HEIGHT: f32 = 120.0;
-pub const DEBUG_HEIGHT: f32 = 118.0;
-
-const HIGHLIGHT: Color32 = Color32::from_rgb(0xFF, 0xD6, 0x4D);
-const ACTIVE_SIZE: f32 = 22.0;
-const SIDE_SIZE: f32 = 14.0;
-const PANEL_ALPHA: f32 = 0.55;
-/// Ukuran teks satu baris di mode notch.
-const NOTCH_TEXT_SIZE: f32 = 17.0;
-/// Opacity panel saat kursor berada di atasnya (supaya yang di bawah terlihat).
-const HOVER_ALPHA: f32 = 0.3;
 /// Seberapa sering posisi/layar target mode notch dicek ulang.
 const TOP_RECHECK: Duration = Duration::from_secs(2);
 
@@ -38,10 +33,23 @@ enum Layout {
     Notch { kind: Kind, debug: bool },
 }
 
+/// Ukuran window mode panel: kotak panel + margin transparan untuk shadow,
+/// ditambah area overlay debug di bawahnya kalau aktif.
 pub fn window_size(debug: bool) -> egui::Vec2 {
     vec2(
-        WIDTH,
-        LYRICS_HEIGHT + if debug { DEBUG_HEIGHT } else { 0.0 },
+        theme::PANEL_SIZE.x + 2.0 * theme::WINDOW_MARGIN_X,
+        theme::WINDOW_MARGIN_TOP
+            + theme::PANEL_SIZE.y
+            + theme::WINDOW_MARGIN_BOTTOM
+            + if debug { theme::DEBUG_HEIGHT } else { 0.0 },
+    )
+}
+
+/// Kotak panel di dalam window.
+fn panel_rect(origin: Pos2) -> Rect {
+    Rect::from_min_size(
+        origin + vec2(theme::WINDOW_MARGIN_X, theme::WINDOW_MARGIN_TOP),
+        theme::PANEL_SIZE,
     )
 }
 
@@ -327,7 +335,7 @@ impl MiniLyricsApp {
 
     fn debug_height(&self) -> f32 {
         if self.settings.debug {
-            DEBUG_HEIGHT
+            theme::DEBUG_HEIGHT
         } else {
             0.0
         }
@@ -382,18 +390,22 @@ impl eframe::App for MiniLyricsApp {
             .lock()
             .map(|s| s.clone())
             .unwrap_or_default();
-        let debug_top = match self.settings.display_mode {
+        let full = ui.ctx().content_rect();
+        // Kolom tempat overlay debug: tepat di bawah panel/bentuk notch.
+        let debug_column = match self.settings.display_mode {
             DisplayMode::Panel => {
                 self.ui_panel(ui, &np, now);
-                LYRICS_HEIGHT
+                let panel = panel_rect(full.min);
+                Rect::from_x_y_ranges(panel.x_range(), panel.max.y..=full.max.y)
             }
             DisplayMode::Notch => {
                 self.ui_notch(ui, &np, now);
-                self.notch_kind.window_size(0.0).y
+                let top = full.min.y + self.notch_kind.window_size(0.0).y;
+                Rect::from_x_y_ranges(full.shrink(2.0).x_range(), top..=full.max.y)
             }
         };
         if self.settings.debug {
-            self.draw_debug(ui, &np, now, debug_top);
+            self.draw_debug(ui, &np, now, debug_column);
         }
     }
 
@@ -407,33 +419,51 @@ impl eframe::App for MiniLyricsApp {
     }
 }
 
+/// Isi panel yang sedang tampil. Saat berganti, isi baru fade-in.
+#[derive(Debug, Clone, PartialEq)]
+enum Content {
+    Idle,
+    Loading,
+    NotFound,
+    NetworkError,
+    Lyrics { track: Option<String> },
+}
+
+/// Ikon kecil di depan judul status.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum StatusIcon {
+    None,
+    Loading,
+    NotFound,
+    Error,
+}
+
 impl MiniLyricsApp {
     /// Opacity tambahan dari efek redup saat kursor di atas `area`.
     fn hover_alpha(&self, ui: &egui::Ui, area: Rect) -> f32 {
         let hovered = self.cursor.is_some_and(|c| area.contains(c));
-        let t = ui
-            .ctx()
-            .animate_bool_with_time(ui.scope_id().with("hover-dim"), hovered, 0.15);
-        1.0 + (HOVER_ALPHA - 1.0) * t
+        let t = ui.ctx().animate_bool_with_time(
+            ui.scope_id().with("hover-dim"),
+            hovered,
+            theme::HOVER_FADE,
+        );
+        lerp(1.0, theme::HOVER_OPACITY, t)
     }
 
-    /// Mode "Panel bawah": 3 baris, bisa di-drag.
+    /// Mode "Panel bawah" (1a · Kalem): kotak gelap 3 baris, bisa di-drag.
     fn ui_panel(&self, ui: &egui::Ui, np: &now_playing::NowPlaying, now: Instant) {
         let player = np.player.as_ref();
         let view = self.lyrics.view();
+        let ctx = ui.ctx();
+        let panel = panel_rect(ctx.content_rect().min);
 
-        let full = ui.ctx().content_rect();
-        let panel = Rect::from_min_size(full.min, vec2(full.width(), LYRICS_HEIGHT)).shrink(2.0);
-        let painter = ui.painter().with_clip_rect(panel);
-
+        // Paused meredupkan seluruh panel (latar + isi), seperti opacity
+        // CSS di desain.
         let paused = player.is_some_and(|p| !p.is_playing);
-        let hover = self.hover_alpha(ui, panel);
-        let dim = if paused { 0.5 } else { 1.0 } * hover;
-        painter.rect_filled(
-            panel,
-            CornerRadius::same(14),
-            Color32::from_black_alpha((PANEL_ALPHA * hover * 255.0) as u8),
-        );
+        let pause_t =
+            ctx.animate_bool_with_time(ui.scope_id().with("paused"), paused, theme::PAUSE_FADE);
+        let opacity = lerp(1.0, theme::PAUSED_OPACITY, pause_t) * self.hover_alpha(ui, panel);
+        paint_panel(ui.painter(), panel, opacity);
 
         // Drag: tekan tombol kiri di panel → biarkan OS memindahkan window.
         let resp = ui.interact(
@@ -442,99 +472,135 @@ impl MiniLyricsApp {
             Sense::click_and_drag(),
         );
         if resp.hovered() && ui.input(|i| i.pointer.primary_pressed()) {
-            ui.ctx().send_viewport_cmd(ViewportCommand::StartDrag);
+            ctx.send_viewport_cmd(ViewportCommand::StartDrag);
         }
 
-        let cx = panel.center().x;
-        let max_w = panel.width() - 28.0;
-        let y_prev = panel.min.y + 22.0;
-        let y_cur = panel.center().y;
-        let y_next = panel.max.y - 22.0;
-        let side = |painter: &Painter, y: f32, text: &str, alpha: f32| {
-            draw_line(
-                painter,
-                pos2(cx, y),
-                max_w,
-                text,
-                SIDE_SIZE,
-                white(alpha * dim),
-            );
+        let content = match (player, &view.status) {
+            (None, _) => Content::Idle,
+            (Some(_), LyricsStatus::Ready(_)) => Content::Lyrics {
+                track: view.track_key.clone(),
+            },
+            (Some(_), LyricsStatus::NotFound) => Content::NotFound,
+            (Some(_), LyricsStatus::NetworkError(_)) => Content::NetworkError,
+            (Some(_), _) => Content::Loading,
         };
-        let song_line = player.map(|p| {
-            if p.artist.is_empty() {
-                p.title.clone()
-            } else {
-                format!("{} — {}", p.title, p.artist)
-            }
-        });
+        let fade = animation_t(ui, "content", content.clone(), now, theme::STATE_FADE);
+        let alpha = opacity * fade;
+        let painter = ui
+            .painter()
+            .with_clip_rect(panel.shrink(theme::PANEL_BORDER_WIDTH));
 
         match (player, &view.status) {
-            (None, _) => {
-                draw_line(
-                    &painter,
-                    pos2(cx, y_cur),
-                    max_w,
-                    "Putar lagu dulu ♪",
-                    18.0,
-                    white(0.85 * hover),
-                );
-            }
             (Some(p), LyricsStatus::Ready(lines)) => {
-                let pos = p.position_at(now) + self.settings.offset_secs;
-                let f = karaoke::frame_at(lines, pos);
-                if let Some(prev) = f.prev {
-                    side(&painter, y_prev, prev, 0.45);
-                }
-                match f.current {
-                    Some(text) if !text.trim().is_empty() => {
-                        draw_karaoke(
-                            &painter,
-                            pos2(cx, y_cur),
-                            max_w,
-                            text,
-                            ACTIVE_SIZE,
-                            f.progress,
-                            dim,
-                        );
-                    }
-                    _ => {
-                        let label = if f.current.is_none() {
-                            song_line.clone().unwrap_or_else(|| "♪".into())
-                        } else {
-                            "♪".into()
-                        };
-                        draw_line(
-                            &painter,
-                            pos2(cx, y_cur),
-                            max_w,
-                            &label,
-                            18.0,
-                            white(0.7 * dim),
-                        );
-                    }
-                }
-                if let Some(next) = f.next {
-                    side(&painter, y_next, next, 0.7);
-                }
+                self.draw_lyrics(ui, &painter, panel, p, lines, alpha, now)
             }
-            (Some(_), status) => {
-                let msg = match status {
-                    LyricsStatus::NotFound => "Lirik sinkron nggak ketemu",
-                    LyricsStatus::NetworkError(_) => "Gagal konek ke server lirik",
-                    _ => "Nyari lirik…",
+            _ => {
+                let song = player.map(song_label).unwrap_or_default();
+                let (icon, main, sub) = match content {
+                    Content::Idle => (
+                        StatusIcon::None,
+                        "Putar lagu dulu ♪",
+                        "Spotify lagi diam".to_string(),
+                    ),
+                    Content::NotFound => (StatusIcon::NotFound, "Lirik sinkron nggak ketemu", song),
+                    Content::NetworkError => (
+                        StatusIcon::Error,
+                        "Gagal konek ke server lirik",
+                        retry_label(view, now),
+                    ),
+                    _ => (StatusIcon::Loading, "Nyari lirik…", song),
                 };
-                draw_line(
-                    &painter,
-                    pos2(cx, y_cur - 10.0),
-                    max_w,
-                    msg,
-                    18.0,
-                    white(0.85 * dim),
-                );
-                if let Some(s) = &song_line {
-                    side(&painter, y_cur + 18.0, s, 0.55);
-                }
+                draw_status(ui, &painter, panel, icon, main, &sub, alpha);
             }
+        }
+
+        if pause_t > 0.0 {
+            paint_pause_bars(&painter, panel, opacity * pause_t);
+        }
+    }
+
+    /// Tiga baris lirik: sebelumnya, aktif (karaoke), berikutnya.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_lyrics(
+        &self,
+        ui: &egui::Ui,
+        painter: &Painter,
+        panel: Rect,
+        p: &PlayerState,
+        lines: &[LyricLine],
+        alpha: f32,
+        now: Instant,
+    ) {
+        let pos = p.position_at(now) + self.settings.offset_secs;
+        let f = karaoke::frame_at(lines, pos);
+
+        // Pindah baris: semua baris naik sedikit ke posisinya sambil fade-in.
+        let idx = karaoke::active_index(lines, pos);
+        let t =
+            egui::emath::easing::cubic_out(animation_t(ui, "line", idx, now, theme::LINE_SHIFT));
+        let dy = theme::LINE_SHIFT_PX * (1.0 - t);
+        let alpha = alpha * lerp(theme::LINE_SHIFT_FROM_ALPHA, 1.0, t);
+
+        let (prev, active, next) = (theme::PREV_TEXT, theme::ACTIVE_TEXT, theme::NEXT_TEXT);
+        let total =
+            prev.line_height + active.line_height + next.line_height + 2.0 * theme::LINE_GAP;
+        let top = panel.center().y - total / 2.0 + dy;
+        let y_prev = top + prev.line_height / 2.0;
+        let y_active = top + prev.line_height + theme::LINE_GAP + active.line_height / 2.0;
+        let y_next = top + total - next.line_height / 2.0;
+        let cx = panel.center().x;
+        let max_w = panel.width() - 2.0 * theme::PANEL_PAD_X;
+
+        if let Some(text) = f.prev {
+            draw_text(
+                painter,
+                pos2(cx, y_prev),
+                max_w,
+                text,
+                &prev,
+                theme::PREV_COLOR,
+                alpha,
+            );
+        }
+        match f.current {
+            Some(text) if !text.trim().is_empty() => draw_karaoke(
+                painter,
+                pos2(cx, y_active),
+                max_w,
+                text,
+                &active,
+                theme::ACTIVE_BASE.faded(alpha),
+                theme::ACTIVE_FILL.faded(alpha),
+                f.progress,
+            ),
+            // Sebelum baris pertama: judul — artis. Jeda instrumental: ♪.
+            current => {
+                let label = match current {
+                    None => song_label(p),
+                    Some(_) => "♪".into(),
+                };
+                let at = pos2(cx, y_active);
+                draw_text(
+                    painter,
+                    at,
+                    max_w,
+                    &label,
+                    &active,
+                    theme::ACTIVE_BASE,
+                    alpha,
+                );
+            }
+        }
+        if let Some(text) = f.next {
+            draw_text(
+                painter,
+                pos2(cx, y_next),
+                max_w,
+                text,
+                &next,
+                theme::NEXT_COLOR,
+                alpha,
+            );
         }
     }
 
@@ -550,9 +616,11 @@ impl MiniLyricsApp {
 
         // Expanded selama ada lagu yang diputar; pause/tanpa lagu → collapsed.
         let expanded = player.is_some_and(|p| p.is_playing);
-        let t = ui
-            .ctx()
-            .animate_bool_with_time(ui.scope_id().with("notch-expand"), expanded, 0.35);
+        let t = ui.ctx().animate_bool_with_time(
+            ui.scope_id().with("notch-expand"),
+            expanded,
+            theme::NOTCH_EXPAND,
+        );
         let body = kind.body_rect(full.min, full.width(), t);
         let hover = self.hover_alpha(ui, kind.hit_rect(body));
         let color = Color32::from_black_alpha((255.0 * hover) as u8);
@@ -586,14 +654,24 @@ impl MiniLyricsApp {
                         center,
                         max_w,
                         text,
-                        NOTCH_TEXT_SIZE,
+                        &theme::NOTCH_TEXT,
+                        theme::NOTCH_BASE.faded(alpha),
+                        theme::NOTCH_FILL.faded(alpha),
                         f.progress,
-                        alpha,
                     ),
                     // Sebelum baris pertama / jeda: tampilkan baris berikutnya redup.
                     _ => {
                         let label = f.next.filter(|n| !n.trim().is_empty()).unwrap_or("♪");
-                        draw_line(&painter, center, max_w, label, 15.0, white(0.55 * alpha));
+                        let style = &theme::NOTCH_HINT_TEXT;
+                        draw_text(
+                            &painter,
+                            center,
+                            max_w,
+                            label,
+                            style,
+                            theme::NOTCH_HINT_COLOR,
+                            alpha,
+                        );
                     }
                 }
             }
@@ -604,156 +682,425 @@ impl MiniLyricsApp {
                     _ => "Nyari lirik…",
                 };
                 let label = format!("{msg} · {}", p.title);
-                draw_line(&painter, center, max_w, &label, 14.0, white(0.8 * alpha));
+                let style = &theme::NOTCH_STATUS_TEXT;
+                draw_text(
+                    &painter,
+                    center,
+                    max_w,
+                    &label,
+                    style,
+                    theme::NOTCH_STATUS_COLOR,
+                    alpha,
+                );
             }
         }
     }
 
-    fn draw_debug(&self, ui: &egui::Ui, np: &now_playing::NowPlaying, now: Instant, top: f32) {
-        let full = ui.ctx().content_rect();
-        let rect = Rect::from_min_max(
-            pos2(full.min.x + 2.0, full.min.y + top + 2.0),
-            full.max - vec2(2.0, 2.0),
-        );
-        let painter = ui.painter().with_clip_rect(rect);
-        painter.rect_filled(rect, CornerRadius::same(8), Color32::from_black_alpha(200));
-
+    /// Overlay debug: kotak monospace kecil di bawah panel, dua kolom
+    /// (kunci, nilai). `column` = area di bawah panel/bentuk notch.
+    fn draw_debug(&self, ui: &egui::Ui, np: &now_playing::NowPlaying, now: Instant, column: Rect) {
         let view = self.lyrics.view();
-        let mut lines = vec![version_label()];
+        let poll = np.poll_duration.map_or(0, |d| d.as_millis());
+        let mut rows: Vec<(&str, String)> = Vec::new();
         match &np.player {
             Some(p) => {
                 let interp = p.position_at(now);
-                lines.push(format!("src: {}", p.source_app));
-                lines.push(format!("lagu: {} — {} [{}]", p.title, p.artist, p.album));
-                lines.push(format!(
-                    "pos: mentah {:.2}s | interp {:.2}s | +offset {:.2}s | offset {:+.1}s | {}",
-                    p.position_secs,
-                    interp,
-                    interp + self.settings.offset_secs,
-                    self.settings.offset_secs,
-                    if p.is_playing { "playing" } else { "paused" }
-                ));
-                lines.push(format!(
-                    "umur sampel: {:.1}s | durasi {:.1}s | poll {} ms",
-                    p.sample_age(now).as_secs_f64(),
-                    p.duration_secs,
-                    np.poll_duration.map_or(0, |d| d.as_millis())
+                rows.push(("src", format!("{} · poll {poll} ms", p.source_app)));
+                rows.push(("lagu", song_label(p)));
+                rows.push((
+                    "posisi",
+                    format!(
+                        "raw {} → interp {} ({:+.0} ms) · umur {:.1} dtk · {}",
+                        clock(p.position_secs),
+                        clock(interp),
+                        (interp - p.position_secs) * 1000.0,
+                        p.sample_age(now).as_secs_f64(),
+                        if p.is_playing { "playing" } else { "paused" }
+                    ),
                 ));
             }
-            None => lines.push(format!(
-                "player: - | poll {} ms",
-                np.poll_duration.map_or(0, |d| d.as_millis())
-            )),
+            None => rows.push(("src", format!("— · poll {poll} ms"))),
         }
-        let mut lyr = format!(
-            "lirik: {} | latency LRCLIB {} | percobaan {}",
-            view.status.label(),
-            view.latency
-                .map_or("-".to_string(), |d| format!("{} ms", d.as_millis())),
-            view.attempts
-        );
-        if let Some(at) = view.retry_at {
-            lyr.push_str(&format!(
-                " | retry {:.0}s",
-                at.saturating_duration_since(now).as_secs_f64()
-            ));
-        }
-        lines.push(lyr);
+        rows.push(("offset", tray::offset_text(self.settings.offset_secs)));
+        rows.push(("lirik", lyrics_debug_label(view, now)));
         if let LyricsStatus::NetworkError(e) = &view.status {
-            lines.push(format!("net: {e}"));
+            rows.push(("net", e.clone()));
         }
         if let Some(e) = &np.last_error {
-            lines.push(format!("now-playing: {e}"));
+            rows.push(("player", e.clone()));
         }
+        rows.truncate(theme::DEBUG_MAX_ROWS);
 
-        let font = FontId::monospace(10.5);
-        let mut y = rect.min.y + 6.0;
-        for line in lines {
-            let g = painter.layout(
-                line,
+        let pad = theme::DEBUG_PAD;
+        let height = 2.0 * pad.y + rows.len() as f32 * theme::DEBUG_ROW_HEIGHT;
+        let rect = Rect::from_min_size(
+            column.min + vec2(0.0, theme::DEBUG_GAP),
+            vec2(column.width(), height),
+        );
+        let painter = ui.painter().with_clip_rect(rect);
+        painter.rect_filled(
+            rect,
+            CornerRadius::same(theme::DEBUG_RADIUS),
+            theme::DEBUG_BG.color(),
+        );
+
+        let font = FontId::monospace(theme::DEBUG_FONT_SIZE);
+        let key_color = theme::DEBUG_KEY_COLOR.color();
+        let value_color = theme::DEBUG_VALUE_COLOR.color();
+        let value_x = rect.min.x + pad.x + theme::DEBUG_KEY_WIDTH + theme::DEBUG_COL_GAP;
+        let value_w = rect.max.x - pad.x - value_x;
+        for (i, (key, value)) in rows.into_iter().enumerate() {
+            let cy = rect.min.y + pad.y + (i as f32 + 0.5) * theme::DEBUG_ROW_HEIGHT;
+            painter.text(
+                pos2(rect.min.x + pad.x, cy),
+                Align2::LEFT_CENTER,
+                key,
                 font.clone(),
-                Color32::from_gray(225),
-                rect.width() - 16.0,
+                key_color,
             );
-            let h = g.size().y;
-            painter.galley(pos2(rect.min.x + 8.0, y), g, Color32::WHITE);
-            y += h + 1.0;
+            let value = ellipsize(&value, value_w, |s| {
+                painter.layout_no_wrap(s.to_string(), font.clone(), value_color)
+            });
+            let g = painter.layout_no_wrap(value, font.clone(), value_color);
+            let at = Align2::LEFT_CENTER.anchor_size(pos2(value_x, cy), g.size());
+            painter.galley(at.min, g, value_color);
         }
     }
 }
 
-fn white(alpha: f32) -> Color32 {
-    Color32::from_white_alpha((alpha.clamp(0.0, 1.0) * 255.0) as u8)
+fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t
 }
 
-fn with_alpha(c: Color32, alpha: f32) -> Color32 {
-    Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), (alpha.clamp(0.0, 1.0) * 255.0) as u8)
+/// Progress animasi (0..1) sejak `value` terakhir berubah. Disimpan di
+/// memori egui per `key`; nilai pertama yang dilihat dianggap sudah selesai.
+fn animation_t<T>(ui: &egui::Ui, key: &str, value: T, now: Instant, duration: f32) -> f32
+where
+    T: PartialEq + Clone + Send + Sync + 'static,
+{
+    let id = ui.scope_id().with(key);
+    let changed_at = ui.ctx().data_mut(|d| {
+        let entry = d.get_temp_mut_or_insert_with(id, || (value.clone(), None::<Instant>));
+        if entry.0 != value {
+            *entry = (value, Some(now));
+        }
+        entry.1
+    });
+    let Some(at) = changed_at else {
+        return 1.0;
+    };
+    let t = (now.duration_since(at).as_secs_f32() / duration).min(1.0);
+    if t < 1.0 {
+        ui.ctx().request_repaint();
+    }
+    t
 }
 
-/// Ukuran font supaya teks muat di `max_w` (minimal 60% dari ukuran asli).
-fn fitted_size(painter: &Painter, text: &str, size: f32, max_w: f32) -> f32 {
-    let w = painter
-        .layout_no_wrap(text.to_string(), FontId::proportional(size), Color32::WHITE)
-        .size()
-        .x;
-    if w > max_w {
-        (size * max_w / w).max(size * 0.6)
+fn song_label(p: &PlayerState) -> String {
+    if p.artist.is_empty() {
+        p.title.clone()
     } else {
-        size
+        format!("{} — {}", p.title, p.artist)
     }
 }
 
-fn draw_line(painter: &Painter, center: Pos2, max_w: f32, text: &str, size: f32, color: Color32) {
-    let size = fitted_size(painter, text, size, max_w);
-    let font = FontId::proportional(size);
-    let shadow = Color32::from_black_alpha(color.a() / 2);
-    let g = painter.layout_no_wrap(text.to_string(), font.clone(), shadow);
-    let rect = Align2::CENTER_CENTER.anchor_size(center, g.size());
-    painter.galley(rect.min + vec2(1.0, 1.0), g, shadow);
-    let g = painter.layout_no_wrap(text.to_string(), font, color);
-    painter.galley(rect.min, g, color);
+fn retry_label(view: &LyricsView, now: Instant) -> String {
+    match view.retry_at {
+        Some(at) => {
+            let secs = at.saturating_duration_since(now).as_secs_f32().ceil();
+            if secs >= 1.0 {
+                format!("Nyoba lagi dalam {secs:.0} dtk…")
+            } else {
+                "Nyoba lagi…".into()
+            }
+        }
+        None => "Nyoba lagi…".into(),
+    }
 }
 
-/// Baris aktif dengan efek karaoke: teks putih redup, lalu teks kuning yang
+/// `mm:ss.mmm`
+fn clock(secs: f64) -> String {
+    let ms = (secs.max(0.0) * 1000.0).round() as u64;
+    format!("{:02}:{:02}.{:03}", ms / 60_000, ms / 1000 % 60, ms % 1000)
+}
+
+fn lyrics_debug_label(view: &LyricsView, now: Instant) -> String {
+    let mut out = match &view.status {
+        LyricsStatus::Ready(lines) => format!("synced · {} baris", lines.len()),
+        LyricsStatus::Idle => "idle".into(),
+        LyricsStatus::Loading => "nyari…".into(),
+        LyricsStatus::NotFound => "nggak ketemu".into(),
+        LyricsStatus::NetworkError(_) => "error jaringan".into(),
+    };
+    out.push_str(if now_playing::demo::enabled() {
+        " · demo"
+    } else {
+        " · lrclib"
+    });
+    if let Some(d) = view.latency {
+        out.push_str(&format!(" · latency {} ms", d.as_millis()));
+    }
+    out.push_str(&format!(" · percobaan {}", view.attempts));
+    if let Some(at) = view.retry_at {
+        let secs = at.saturating_duration_since(now).as_secs_f64();
+        out.push_str(&format!(" · retry {secs:.0} dtk"));
+    }
+    out
+}
+
+/// Latar panel: satu shadow sederhana, isi hitam transparan, border tipis.
+fn paint_panel(painter: &Painter, panel: Rect, opacity: f32) {
+    let radius = CornerRadius::same(theme::PANEL_RADIUS);
+    let shadow = Shadow {
+        offset: theme::PANEL_SHADOW_OFFSET,
+        blur: theme::PANEL_SHADOW_BLUR,
+        spread: 0,
+        color: theme::PANEL_SHADOW.faded(opacity),
+    };
+    painter.add(shadow.as_shape(panel, radius));
+    painter.rect(
+        panel,
+        radius,
+        theme::PANEL_BG.faded(opacity),
+        Stroke::new(
+            theme::PANEL_BORDER_WIDTH,
+            theme::PANEL_BORDER.faded(opacity),
+        ),
+        StrokeKind::Inside,
+    );
+}
+
+/// Tanda jeda ❚❚ di kiri panel.
+fn paint_pause_bars(painter: &Painter, panel: Rect, alpha: f32) {
+    let color = theme::PAUSE_BAR_COLOR.faded(alpha);
+    let first = panel.min + theme::PAUSE_BARS_POS;
+    for i in 0..2 {
+        let x = i as f32 * (theme::PAUSE_BAR_SIZE.x + theme::PAUSE_BAR_GAP);
+        painter.rect_filled(
+            Rect::from_min_size(first + vec2(x, 0.0), theme::PAUSE_BAR_SIZE),
+            CornerRadius::same(theme::PAUSE_BAR_RADIUS),
+            color,
+        );
+    }
+}
+
+/// Status di tengah panel: [ikon] judul, lalu sub di bawahnya.
+fn draw_status(
+    ui: &egui::Ui,
+    painter: &Painter,
+    panel: Rect,
+    icon: StatusIcon,
+    main: &str,
+    sub: &str,
+    alpha: f32,
+) {
+    let (main_style, sub_style) = (theme::STATUS_MAIN_TEXT, theme::STATUS_SUB_TEXT);
+    let max_w = panel.width() - 2.0 * theme::PANEL_PAD_X;
+    let icon_w = match icon {
+        StatusIcon::None => 0.0,
+        StatusIcon::Loading => 3.0 * theme::LOADING_DOT_SIZE + 2.0 * theme::LOADING_DOT_GAP,
+        StatusIcon::NotFound => theme::NOT_FOUND_RING_SIZE,
+        StatusIcon::Error => theme::ERROR_DOT_SIZE,
+    };
+    let icon_space = if icon_w > 0.0 {
+        icon_w + theme::STATUS_ICON_GAP
+    } else {
+        0.0
+    };
+
+    let main_color = theme::STATUS_MAIN_COLOR.faded(alpha);
+    let (text, size) = fit_line(
+        painter,
+        main,
+        &main_style,
+        max_w - icon_space,
+        theme::MIN_FONT_SCALE,
+    );
+    let main_g = text_galley(painter, &text, &main_style, size, main_color);
+
+    let total = main_style.line_height + theme::STATUS_GAP + sub_style.line_height;
+    let top = panel.center().y - total / 2.0;
+    let main_cy = top + main_style.line_height / 2.0;
+    let x0 = panel.center().x - (icon_space + main_g.size().x) / 2.0;
+
+    match icon {
+        StatusIcon::None => {}
+        StatusIcon::Loading => {
+            // Titik paling terang berpindah ke kanan tiap LOADING_STEP.
+            let step = (ui.input(|i| i.time) / theme::LOADING_STEP as f64) as usize % 3;
+            let r = theme::LOADING_DOT_SIZE / 2.0;
+            for i in 0..3 {
+                let a = theme::LOADING_DOT_ALPHAS[(i + 3 - step) % 3];
+                let x = x0 + r + i as f32 * (theme::LOADING_DOT_SIZE + theme::LOADING_DOT_GAP);
+                painter.circle_filled(
+                    pos2(x, main_cy),
+                    r,
+                    theme::LOADING_DOT_COLOR.faded(a * alpha),
+                );
+            }
+            ui.ctx()
+                .request_repaint_after(Duration::from_secs_f32(theme::LOADING_STEP));
+        }
+        StatusIcon::NotFound => {
+            let w = theme::NOT_FOUND_RING_WIDTH;
+            painter.circle_stroke(
+                pos2(x0 + icon_w / 2.0, main_cy),
+                (theme::NOT_FOUND_RING_SIZE - w) / 2.0,
+                Stroke::new(w, theme::NOT_FOUND_RING_COLOR.faded(alpha)),
+            );
+        }
+        StatusIcon::Error => {
+            painter.circle_filled(
+                pos2(x0 + icon_w / 2.0, main_cy),
+                theme::ERROR_DOT_SIZE / 2.0,
+                theme::ERROR_DOT_COLOR.faded(alpha),
+            );
+        }
+    }
+    let at = Align2::LEFT_CENTER.anchor_size(pos2(x0 + icon_space, main_cy), main_g.size());
+    paint_weighted(painter, at.min, main_g, main_style.weight, main_color);
+
+    // Sub (judul — artis, dll.): ukuran tetap, ellipsis kalau kepanjangan.
+    let sub_cy = top + total - sub_style.line_height / 2.0;
+    draw_text(
+        painter,
+        pos2(panel.center().x, sub_cy),
+        max_w,
+        sub,
+        &sub_style,
+        theme::STATUS_SUB_COLOR,
+        alpha,
+    );
+}
+
+/// Galley satu baris tanpa wrap dengan weight & letter spacing dari `style`.
+fn text_galley(
+    painter: &Painter,
+    text: &str,
+    style: &TextStyle,
+    size: f32,
+    color: Color32,
+) -> Arc<Galley> {
+    painter.layout_job(LayoutJob::single_section(
+        text.to_string(),
+        TextFormat {
+            font_id: FontId::proportional(size),
+            color,
+            extra_letter_spacing: style.letter_spacing_em * size,
+            coords: fonts::weight_coords(style.weight),
+            ..Default::default()
+        },
+    ))
+}
+
+/// Gambar galley; kalau font utama statis, weight > 400 ditiru dengan
+/// menggambar dua kali bergeser sedikit (faux-bold).
+fn paint_weighted(painter: &Painter, pos: Pos2, galley: Arc<Galley>, weight: f32, color: Color32) {
+    let bold = fonts::faux_bold_px(weight);
+    if bold > 0.0 {
+        painter.galley(pos + vec2(bold, 0.0), galley.clone(), color);
+    }
+    painter.galley(pos, galley, color);
+}
+
+/// Muat teks di `max_w` tanpa wrap: font mengecil sampai `min_scale` × ukuran
+/// normal, kalau masih kepanjangan dipotong dengan ellipsis.
+fn fit_line(
+    painter: &Painter,
+    text: &str,
+    style: &TextStyle,
+    max_w: f32,
+    min_scale: f32,
+) -> (String, f32) {
+    let width = |s: &str, size: f32| {
+        text_galley(painter, s, style, size, Color32::WHITE)
+            .size()
+            .x
+    };
+    let base = style.size;
+    let w = width(text, base);
+    if w <= max_w {
+        return (text.to_string(), base);
+    }
+    let size = (base * max_w / w).max(base * min_scale);
+    if width(text, size) <= max_w + 0.5 {
+        return (text.to_string(), size);
+    }
+    let text = ellipsize(text, max_w, |s| {
+        text_galley(painter, s, style, size, Color32::WHITE)
+    });
+    (text, size)
+}
+
+/// Potong `text` dengan "…" sampai muat di `max_w` (cari biner per karakter).
+fn ellipsize(text: &str, max_w: f32, layout: impl Fn(&str) -> Arc<Galley>) -> String {
+    if layout(text).size().x <= max_w {
+        return text.to_string();
+    }
+    let ends: Vec<usize> = text.char_indices().map(|(i, c)| i + c.len_utf8()).collect();
+    let candidate = |n: usize| {
+        let head = if n == 0 { "" } else { &text[..ends[n - 1]] };
+        format!("{}…", head.trim_end())
+    };
+    let (mut lo, mut hi) = (0, ends.len().saturating_sub(1));
+    while lo < hi {
+        let mid = (lo + hi).div_ceil(2);
+        if layout(&candidate(mid)).size().x <= max_w {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    candidate(lo)
+}
+
+/// Satu baris teks di tengah `center`, dimuatkan ke `max_w`.
+fn draw_text(
+    painter: &Painter,
+    center: Pos2,
+    max_w: f32,
+    text: &str,
+    style: &TextStyle,
+    tint: Tint,
+    alpha: f32,
+) {
+    let color = tint.faded(alpha);
+    let (text, size) = fit_line(painter, text, style, max_w, theme::MIN_FONT_SCALE);
+    let g = text_galley(painter, &text, style, size, color);
+    let rect = Align2::CENTER_CENTER.anchor_size(center, g.size());
+    paint_weighted(painter, rect.min, g, style.weight, color);
+}
+
+/// Baris aktif dengan efek karaoke: teks `base`, lalu teks `fill` yang
 /// di-clip dari kiri selebar `progress`.
+#[allow(clippy::too_many_arguments)]
 fn draw_karaoke(
     painter: &Painter,
     center: Pos2,
     max_w: f32,
     text: &str,
-    size: f32,
+    style: &TextStyle,
+    base: Color32,
+    fill: Color32,
     progress: f32,
-    dim: f32,
 ) {
-    let size = fitted_size(painter, text, size, max_w);
-    let font = FontId::proportional(size);
-    let base_color = white(0.55 * dim);
-    let fill_color = with_alpha(HIGHLIGHT, dim);
-    let shadow_color = Color32::from_black_alpha((160.0 * dim) as u8);
-
-    let shadow = painter.layout_no_wrap(text.to_string(), font.clone(), shadow_color);
-    let rect = Align2::CENTER_CENTER.anchor_size(center, shadow.size());
-    painter.galley(rect.min + vec2(1.5, 1.5), shadow, shadow_color);
-
-    // egui tidak punya varian bold untuk font default; tebalkan dengan
-    // menggambar dua kali bergeser sedikit.
-    let bold = vec2(0.7, 0.0);
-    let base = painter.layout_no_wrap(text.to_string(), font.clone(), base_color);
-    painter.galley(rect.min, base.clone(), base_color);
-    painter.galley(rect.min + bold, base, base_color);
+    let (text, size) = fit_line(painter, text, style, max_w, theme::MIN_FONT_SCALE);
+    let base_g = text_galley(painter, &text, style, size, base);
+    let rect = Align2::CENTER_CENTER.anchor_size(center, base_g.size());
+    paint_weighted(painter, rect.min, base_g, style.weight, base);
 
     if progress > 0.0 {
+        let bold = fonts::faux_bold_px(style.weight);
         let clip = Rect::from_min_max(
             pos2(rect.min.x - 2.0, rect.min.y - 4.0),
             pos2(
-                rect.min.x + rect.width() * progress + bold.x,
+                rect.min.x + rect.width() * progress + bold,
                 rect.max.y + 4.0,
             ),
         )
         .intersect(painter.clip_rect());
         let p = painter.with_clip_rect(clip);
-        let fill = p.layout_no_wrap(text.to_string(), font, fill_color);
-        p.galley(rect.min, fill.clone(), fill_color);
-        p.galley(rect.min + bold, fill, fill_color);
+        let fill_g = text_galley(&p, &text, style, size, fill);
+        paint_weighted(&p, rect.min, fill_g, style.weight, fill);
     }
 }
