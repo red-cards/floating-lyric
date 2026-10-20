@@ -15,13 +15,16 @@ pub const OK: &str = "OK";
 /// - Cek `is running` dulu supaya Spotify tidak ikut terbuka.
 /// - Field dipisah linefeed: OK, id, name, artist, album, duration (ms),
 ///   player position (detik, real berlocale), player state.
+/// - Nama variabel sengaja panjang: kata pendek seperti `st`, `nd`, `rd`,
+///   `th` adalah kata khusus AppleScript (akhiran "1st") dan membuat script
+///   gagal dikompilasi (-2741).
 pub const SPOTIFY_SCRIPT: &str = r#"if application "Spotify" is running then
 	tell application "Spotify"
 		with timeout of 2 seconds
-			set st to (player state as string)
-			if st is "stopped" then return "STOPPED"
-			set t to current track
-			return "OK" & linefeed & (id of t) & linefeed & (name of t) & linefeed & (artist of t) & linefeed & (album of t) & linefeed & ((duration of t) as string) & linefeed & ((player position) as string) & linefeed & st
+			set playerStateText to (player state as string)
+			if playerStateText is "stopped" then return "STOPPED"
+			set currentTrack to current track
+			return "OK" & linefeed & (id of currentTrack) & linefeed & (name of currentTrack) & linefeed & (artist of currentTrack) & linefeed & (album of currentTrack) & linefeed & ((duration of currentTrack) as string) & linefeed & ((player position) as string) & linefeed & playerStateText
 		end timeout
 	end tell
 end if
@@ -112,6 +115,24 @@ mod tests {
                 .unwrap()
                 .is_playing
         );
+    }
+
+    /// Regresi: `set st to ...` gagal dikompilasi AppleScript (-2741).
+    #[test]
+    fn script_avoids_reserved_ordinal_words() {
+        let reserved = ["st", "nd", "rd", "th"];
+        for line in SPOTIFY_SCRIPT.lines() {
+            let words: Vec<&str> = line.split_whitespace().collect();
+            for pair in words.windows(2) {
+                if pair[0] == "set" {
+                    assert!(
+                        !reserved.contains(&pair[1]),
+                        "variabel AppleScript `{}` adalah kata khusus: {line}",
+                        pair[1]
+                    );
+                }
+            }
+        }
     }
 
     #[test]
