@@ -1,14 +1,19 @@
-//! Geometri & animasi mode tampilan "Notch".
+//! Geometri & animasi mode tampilan "Notch" (handoff Claude Design arah
+//! gaya **D · Notch mode**, putaran 2).
 //!
-//! Di Mac ber-notch, bentuk hitam digambar persis menutupi notch kamera saat
-//! collapsed lalu memanjang ke bawah (dan melebar) saat expanded; lirik satu
-//! baris tampil di bawah area kamera. Di layar tanpa notch dan Windows,
-//! bentuknya pill hitam di tengah atas dengan perilaku yang sama.
+//! Panel #000000 pekat yang tumbuh dari notch fisik. Area kamera di tengah
+//! atas selalu kosong; sudut atas melengkung ke dalam menyatu dengan tepi
+//! layar, sudut bawah membulat. Collapsed cuma sedikit lebih lebar dari notch
+//! (♪ di kiri, equalizer di kanan). Expanded: "telinga" judul/artis di kiri
+//! & kanan kamera, satu baris lirik di bawahnya. Di layar tanpa notch dan
+//! Windows: pill hitam yang menggantung dari tepi atas.
 
 use eframe::egui::{
     epaint::{Mesh, Vertex, WHITE_UV},
     pos2, vec2, Color32, CornerRadius, Painter, Pos2, Rect, Shape, Vec2,
 };
+
+use crate::theme;
 
 /// Ukuran notch kamera (points), hasil deteksi OS.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -17,19 +22,7 @@ pub struct NotchMetrics {
     pub height: f32,
 }
 
-/// Radius inverse fillet di sudut atas notch.
-pub const TOP_FILLET: f32 = 6.0;
-/// Tinggi tambahan di bawah area kamera untuk satu baris lirik.
-pub const LYRIC_STRIP: f32 = 40.0;
-/// Pill (tanpa notch): ukuran collapsed & expanded.
-pub const PILL_COLLAPSED: Vec2 = vec2(120.0, 22.0);
-pub const PILL_EXPANDED: Vec2 = vec2(520.0, 40.0);
-/// Jarak pill dari tepi atas layar.
-#[cfg(target_os = "macos")]
-pub const PILL_TOP_MARGIN: f32 = 1.0;
-#[cfg(not(target_os = "macos"))]
-pub const PILL_TOP_MARGIN: f32 = 8.0;
-/// Ruang kosong di sekeliling bentuk di dalam window.
+/// Ruang kosong di bawah/samping bentuk di dalam window.
 const PAD: f32 = 2.0;
 
 /// Bentuk yang digambar.
@@ -40,7 +33,7 @@ pub enum Kind {
 }
 
 /// Override untuk mengetes bentuk notch di layar tanpa notch:
-/// `MINI_LYRICS_FAKE_NOTCH=185x32` (lebar x tinggi, points).
+/// `MINI_LYRICS_FAKE_NOTCH=200x32` (lebar x tinggi, points).
 pub fn fake_from_env() -> Option<NotchMetrics> {
     parse_fake(&std::env::var("MINI_LYRICS_FAKE_NOTCH").ok()?)
 }
@@ -61,86 +54,216 @@ impl Kind {
         }
     }
 
-    pub fn expanded_size(&self) -> Vec2 {
+    /// Lebar area kamera yang harus kosong (0 untuk pill).
+    pub fn camera_width(&self) -> f32 {
         match self {
-            Kind::Notch(m) => vec2((m.width + 300.0).max(500.0), m.height + LYRIC_STRIP),
-            Kind::Pill => PILL_EXPANDED,
+            Kind::Notch(m) => m.width,
+            Kind::Pill => 0.0,
+        }
+    }
+
+    /// Tinggi pita atas sejajar kamera, tempat telinga (0 untuk pill).
+    pub fn band(&self) -> f32 {
+        match self {
+            Kind::Notch(m) => m.height,
+            Kind::Pill => 0.0,
+        }
+    }
+
+    /// Tinggi baris lirik/status di bawah pita.
+    pub fn row_height(&self) -> f32 {
+        match self {
+            Kind::Notch(_) => theme::NOTCH_ROW_HEIGHT,
+            Kind::Pill => theme::PILL_EXPANDED.y,
         }
     }
 
     pub fn collapsed_size(&self) -> Vec2 {
         match self {
-            Kind::Notch(m) => vec2(m.width, m.height),
-            Kind::Pill => PILL_COLLAPSED,
+            Kind::Notch(m) => vec2(m.width + 2.0 * theme::NOTCH_COLLAPSED_EAR, m.height),
+            Kind::Pill => theme::PILL_COLLAPSED,
         }
     }
 
-    /// Jarak bentuk dari tepi atas layar (notch menempel ke tepi atas).
-    pub fn top_margin(&self) -> f32 {
+    /// Ukuran expanded; `extra` = tambahan tinggi (overlay debug).
+    pub fn expanded_size(&self, extra: f32) -> Vec2 {
         match self {
-            Kind::Notch(_) => 0.0,
-            Kind::Pill => PILL_TOP_MARGIN,
+            Kind::Notch(m) => vec2(
+                theme::NOTCH_EXPANDED_WIDTH.max(m.width + 2.0 * theme::NOTCH_MIN_EAR),
+                m.height + theme::NOTCH_ROW_HEIGHT + extra,
+            ),
+            Kind::Pill => theme::PILL_EXPANDED + vec2(0.0, extra),
         }
     }
 
-    /// Ukuran window (tetap, sebesar bentuk expanded) supaya animasi tidak
-    /// perlu me-resize window native tiap frame.
-    pub fn window_size(&self, extra_height: f32) -> Vec2 {
-        let e = self.expanded_size();
-        let ears = match self {
-            Kind::Notch(_) => 2.0 * TOP_FILLET,
-            Kind::Pill => 0.0,
+    /// Radius sudut bawah untuk progress bentuk `t` (0 collapsed, 1 expanded).
+    pub fn bottom_radius(&self, t: f32) -> f32 {
+        let (c, e) = match self {
+            Kind::Notch(_) => (theme::NOTCH_RADIUS_COLLAPSED, theme::NOTCH_RADIUS_EXPANDED),
+            Kind::Pill => (theme::PILL_RADIUS_COLLAPSED, theme::PILL_RADIUS_EXPANDED),
         };
-        vec2(e.x + ears + 2.0 * PAD, e.y + PAD + extra_height)
+        lerp(c, e, t)
     }
 
-    /// Kotak bentuk (tanpa "telinga" fillet) di dalam window untuk progress
-    /// animasi `t` (0 = collapsed, 1 = expanded). `window_width` = lebar
-    /// window dalam points; bentuk selalu di tengah dan menempel ke atas.
-    pub fn body_rect(&self, origin: Pos2, window_width: f32, t: f32) -> Rect {
-        let t = ease(t);
-        let (c, e) = (self.collapsed_size(), self.expanded_size());
+    /// Jarak bentuk dari tepi atas layar: notch dan pill sama-sama menggantung
+    /// dari tepi atas.
+    pub fn top_margin(&self) -> f32 {
+        0.0
+    }
+
+    /// Ukuran window (tetap, sebesar bentuk expanded + fillet) supaya animasi
+    /// tidak perlu me-resize window native tiap frame.
+    pub fn window_size(&self, extra: f32) -> Vec2 {
+        let e = self.expanded_size(extra);
+        vec2(e.x + 2.0 * (theme::NOTCH_TOP_FILLET + PAD), e.y + PAD)
+    }
+
+    /// Kotak bentuk (tanpa fillet) untuk progress `t`; selalu di tengah dan
+    /// menempel ke atas window.
+    pub fn body_rect(&self, origin: Pos2, window_width: f32, t: f32, extra: f32) -> Rect {
+        let (c, e) = (self.collapsed_size(), self.expanded_size(extra));
         let size = c + (e - c) * t;
         let x = origin.x + (window_width - size.x) / 2.0;
         Rect::from_min_size(pos2(x, origin.y), size)
     }
 
-    /// Area untuk satu baris lirik: di bawah area kamera (notch) atau seluruh
-    /// pill.
-    pub fn text_rect(&self, body: Rect) -> Rect {
-        match self {
-            Kind::Notch(m) => Rect::from_min_max(pos2(body.min.x, body.min.y + m.height), body.max)
-                .shrink2(vec2(18.0, 2.0)),
-            Kind::Pill => body.shrink2(vec2(18.0, 2.0)),
-        }
+    /// Telinga kiri & kanan: pita atas di samping area kamera. Untuk pill
+    /// (tanpa pita) dua-duanya kosong.
+    pub fn ears(&self, body: Rect) -> (Rect, Rect) {
+        let band = self.band();
+        let cam = self.camera_width();
+        let cx = body.center().x;
+        let left = Rect::from_min_max(body.min, pos2(cx - cam / 2.0, body.min.y + band));
+        let right = Rect::from_min_max(
+            pos2(cx + cam / 2.0, body.min.y),
+            pos2(body.max.x, body.min.y + band),
+        );
+        (left, right)
     }
 
-    /// Area yang dianggap "panel" untuk efek redup saat kursor masuk.
+    /// Baris lirik/status di bawah pita, tinggi tetap.
+    pub fn row_rect(&self, body: Rect) -> Rect {
+        let top = body.min.y + self.band();
+        Rect::from_min_max(
+            pos2(body.min.x, top),
+            pos2(body.max.x, top + self.row_height()),
+        )
+    }
+
+    /// Area yang dianggap "panel" (termasuk fillet) untuk hover.
     pub fn hit_rect(&self, body: Rect) -> Rect {
-        match self {
-            Kind::Notch(_) => body.expand2(vec2(TOP_FILLET, 0.0)),
-            Kind::Pill => body,
+        body.expand2(vec2(theme::NOTCH_TOP_FILLET, 0.0))
+    }
+}
+
+fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t
+}
+
+/// `cubic-bezier(x1, y1, x2, y2)` CSS: nilai y untuk progress waktu `x`.
+pub fn cubic_bezier(x1: f32, y1: f32, x2: f32, y2: f32, x: f32) -> f32 {
+    let x = x.clamp(0.0, 1.0);
+    let bez = |a: f32, b: f32, t: f32| {
+        let u = 1.0 - t;
+        3.0 * u * u * t * a + 3.0 * u * t * t * b + t * t * t
+    };
+    // Cari t sehingga bez_x(t) = x (monoton untuk 0 ≤ x1, x2 ≤ 1).
+    let (mut lo, mut hi) = (0.0f32, 1.0f32);
+    for _ in 0..30 {
+        let mid = (lo + hi) / 2.0;
+        if bez(x1, x2, mid) < x {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    bez(y1, y2, (lo + hi) / 2.0)
+}
+
+/// Easing bentuk dari desain: `cubic-bezier(0.32, 0.72, 0, 1)`.
+pub fn shape_ease(x: f32) -> f32 {
+    cubic_bezier(0.32, 0.72, 0.0, 1.0, x)
+}
+
+/// Keadaan animasi collapsed ↔ expanded.
+///
+/// Membuka: lebar & tinggi tumbuh bersamaan ([`theme::NOTCH_SHAPE_MS`]),
+/// isi fade-in ([`theme::NOTCH_CONTENT_IN_MS`]) dengan delay
+/// [`theme::NOTCH_CONTENT_DELAY_MS`]. Menutup: urutan dibalik — isi fade-out
+/// ([`theme::NOTCH_CONTENT_OUT_MS`]) dulu, baru bentuknya menyusut.
+/// Kalau arah berbalik di tengah jalan, animasi lanjut dari nilai saat itu.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Transition {
+    pub open: bool,
+    /// Detik sejak arah terakhir berubah.
+    started: f64,
+    shape_from: f32,
+    content_from: f32,
+}
+
+/// Nilai animasi pada satu saat.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Frame {
+    /// 0 = collapsed, 1 = expanded (sudah di-easing).
+    pub shape: f32,
+    /// Opacity isi expanded (lirik, telinga).
+    pub content: f32,
+    pub settled: bool,
+}
+
+impl Transition {
+    pub fn new(open: bool, now: f64) -> Self {
+        let v = if open { 1.0 } else { 0.0 };
+        Self {
+            open,
+            started: now - 10.0,
+            shape_from: v,
+            content_from: v,
+        }
+    }
+
+    pub fn set(&mut self, open: bool, now: f64) {
+        if open != self.open {
+            let f = self.frame(now);
+            *self = Self {
+                open,
+                started: now,
+                shape_from: f.shape,
+                content_from: f.content,
+            };
+        }
+    }
+
+    pub fn frame(&self, now: f64) -> Frame {
+        let ms = ((now - self.started) * 1000.0).max(0.0) as f32;
+        let clamp = |v: f32| v.clamp(0.0, 1.0);
+        let shape_ms = theme::NOTCH_SHAPE_MS;
+        if self.open {
+            let s = shape_ease(ms / shape_ms);
+            let c = clamp((ms - theme::NOTCH_CONTENT_DELAY_MS) / theme::NOTCH_CONTENT_IN_MS);
+            let end = shape_ms.max(theme::NOTCH_CONTENT_DELAY_MS + theme::NOTCH_CONTENT_IN_MS);
+            Frame {
+                shape: lerp(self.shape_from, 1.0, s),
+                content: lerp(self.content_from, 1.0, c),
+                settled: ms >= end,
+            }
+        } else {
+            let out = theme::NOTCH_CONTENT_OUT_MS;
+            let c = clamp(ms / out);
+            let s = shape_ease((ms - out) / shape_ms);
+            Frame {
+                shape: lerp(self.shape_from, 0.0, s),
+                content: lerp(self.content_from, 0.0, c),
+                settled: ms >= out + shape_ms,
+            }
         }
     }
 }
 
-/// Smoothstep supaya animasi tinggi tidak kaku.
-pub fn ease(t: f32) -> f32 {
-    let t = t.clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
-}
-
-/// Opacity teks: mulai muncul setelah bentuk cukup terbuka.
-pub fn text_alpha(t: f32) -> f32 {
-    ((t - 0.45) / 0.55).clamp(0.0, 1.0)
-}
-
-/// Gambar bentuk notch: hitam, sudut atas inverse fillet (melebar ke luar
-/// menyatu dengan tepi atas), sudut bawah membulat.
-pub fn paint_notch(painter: &Painter, body: Rect, bottom_radius: f32, color: Color32) {
-    let rb = bottom_radius
-        .min(body.height() / 2.0)
-        .min(body.width() / 2.0);
+/// Gambar bentuk: hitam, sudut atas inverse fillet (melebar ke luar menyatu
+/// dengan tepi atas layar), sudut bawah membulat. Dipakai notch dan pill.
+pub fn paint_shape(painter: &Painter, body: Rect, bottom_radius: f32, color: Color32) {
+    let rb = bottom_radius.min(body.height()).min(body.width() / 2.0);
     painter.rect_filled(
         body,
         CornerRadius {
@@ -151,7 +274,7 @@ pub fn paint_notch(painter: &Painter, body: Rect, bottom_radius: f32, color: Col
         },
         color,
     );
-    let rt = TOP_FILLET.min(body.height());
+    let rt = theme::NOTCH_TOP_FILLET.min(body.height());
     painter.add(Shape::mesh(fillet_mesh(body.left_top(), rt, -1.0, color)));
     painter.add(Shape::mesh(fillet_mesh(body.right_top(), rt, 1.0, color)));
 }
@@ -161,7 +284,7 @@ pub fn paint_notch(painter: &Painter, body: Rect, bottom_radius: f32, color: Col
 /// seperempat lingkaran; bentuknya tidak konveks tapi bisa di-fan dari titik
 /// sudut (semua titik busur terlihat dari sana).
 fn fillet_mesh(corner: Pos2, rt: f32, side: f32, color: Color32) -> Mesh {
-    const STEPS: usize = 10;
+    const STEPS: usize = 12;
     let center = pos2(corner.x + side * rt, corner.y + rt);
     let mut mesh = Mesh::default();
     let v = |p: Pos2| Vertex {
@@ -183,16 +306,56 @@ fn fillet_mesh(corner: Pos2, rt: f32, side: f32, color: Color32) -> Mesh {
     mesh
 }
 
-/// Gambar pill hitam.
-pub fn paint_pill(painter: &Painter, body: Rect, color: Color32) {
-    let r = (body.height() / 2.0).min(255.0) as u8;
-    painter.rect_filled(body, CornerRadius::same(r), color);
+/// Tinggi tiga bar equalizer pada waktu `time` (detik). Diam (2 px) saat
+/// lagu dijeda atau belum diputar.
+pub fn equalizer_heights(playing: bool, time: f64) -> [f32; 3] {
+    if !playing {
+        return [theme::EQ_FLAT_HEIGHT; 3];
+    }
+    let mut out = theme::EQ_HEIGHTS;
+    for (i, h) in out.iter_mut().enumerate() {
+        // Tiap bar berayun dengan kecepatan beda supaya tidak seragam.
+        let phase = time * theme::EQ_SPEEDS[i] + i as f64 * 1.7;
+        let k = 0.45 + 0.55 * (0.5 + 0.5 * phase.sin() as f32);
+        *h = (*h * k).clamp(theme::EQ_FLAT_HEIGHT, theme::EQ_MAX_HEIGHT);
+    }
+    out
 }
 
-/// Radius bawah notch: kecil saat collapsed (mirip notch asli), lebih bulat
-/// saat expanded.
-pub fn notch_bottom_radius(t: f32) -> f32 {
-    9.0 + (16.0 - 9.0) * ease(t)
+/// Gambar equalizer tiga bar, rata bawah, dengan pojok kiri bawah di
+/// `left_bottom`.
+pub fn paint_equalizer(painter: &Painter, left_bottom: Pos2, heights: [f32; 3], color: Color32) {
+    let w = theme::EQ_BAR_WIDTH;
+    for (i, h) in heights.into_iter().enumerate() {
+        let x = left_bottom.x + i as f32 * (w + theme::EQ_BAR_GAP);
+        painter.rect_filled(
+            Rect::from_min_max(pos2(x, left_bottom.y - h), pos2(x + w, left_bottom.y)),
+            CornerRadius::same(1),
+            color,
+        );
+    }
+}
+
+/// Lebar total equalizer.
+pub fn equalizer_width() -> f32 {
+    3.0 * theme::EQ_BAR_WIDTH + 2.0 * theme::EQ_BAR_GAP
+}
+
+/// Tanda jeda ❚❚ kecil (kuning); `center_left` = tepi kiri, tengah vertikal.
+pub fn paint_pause(painter: &Painter, center_left: Pos2, color: Color32) {
+    let s = theme::NOTCH_PAUSE_BAR;
+    for i in 0..2 {
+        let x = center_left.x + i as f32 * (s.x + theme::NOTCH_PAUSE_GAP);
+        painter.rect_filled(
+            Rect::from_min_size(pos2(x, center_left.y - s.y / 2.0), s),
+            CornerRadius::same(1),
+            color,
+        );
+    }
+}
+
+pub fn pause_width() -> f32 {
+    2.0 * theme::NOTCH_PAUSE_BAR.x + theme::NOTCH_PAUSE_GAP
 }
 
 #[cfg(test)]
@@ -200,7 +363,7 @@ mod tests {
     use super::*;
 
     const M: NotchMetrics = NotchMetrics {
-        width: 185.0,
+        width: 200.0,
         height: 32.0,
     };
 
@@ -218,72 +381,117 @@ mod tests {
     }
 
     #[test]
-    fn collapsed_notch_matches_camera_area_exactly() {
+    fn notch_sizes_match_design() {
         let k = Kind::Notch(M);
-        let w = k.window_size(0.0).x;
-        let body = k.body_rect(Pos2::ZERO, w, 0.0);
-        assert_eq!(body.size(), vec2(185.0, 32.0));
-        assert_eq!(body.min.y, 0.0);
-        assert!((body.center().x - w / 2.0).abs() < 1e-4);
+        // collapsed 272×32 · expanded 560×80 (pita 32 + baris 48)
+        assert_eq!(k.collapsed_size(), vec2(272.0, 32.0));
+        assert_eq!(k.expanded_size(0.0), vec2(560.0, 80.0));
+        assert_eq!(k.bottom_radius(0.0), 10.0);
+        assert_eq!(k.bottom_radius(1.0), 18.0);
+        // Notch lebar: telinga tetap minimal 180.
+        let wide = Kind::Notch(NotchMetrics {
+            width: 240.0,
+            height: 38.0,
+        });
+        assert_eq!(wide.expanded_size(0.0).x, 600.0);
     }
 
     #[test]
-    fn expanded_notch_fits_window_with_ears() {
+    fn pill_sizes_match_design() {
+        let k = Kind::Pill;
+        // pill 520×44 r22 · collapsed 112×26 r13
+        assert_eq!(k.collapsed_size(), vec2(112.0, 26.0));
+        assert_eq!(k.expanded_size(0.0), vec2(520.0, 44.0));
+        assert_eq!(k.bottom_radius(0.0), 13.0);
+        assert_eq!(k.bottom_radius(1.0), 22.0);
+        assert_eq!(k.band(), 0.0);
+        assert_eq!(k.top_margin(), 0.0);
+    }
+
+    #[test]
+    fn layout_keeps_camera_zone_empty() {
         let k = Kind::Notch(M);
         let ws = k.window_size(0.0);
-        let body = k.body_rect(Pos2::ZERO, ws.x, 1.0);
-        assert_eq!(body.size(), k.expanded_size());
-        let hit = k.hit_rect(body);
-        assert!(hit.min.x >= 0.0 && hit.max.x <= ws.x);
-        assert!(body.max.y <= ws.y);
-        // Teks di bawah area kamera.
-        assert!(k.text_rect(body).min.y >= M.height);
+        let body = k.body_rect(Pos2::ZERO, ws.x, 1.0, 0.0);
+        let (l, r) = k.ears(body);
+        assert_eq!(l.width(), 180.0);
+        assert_eq!(r.width(), 180.0);
+        assert_eq!(r.min.x - l.max.x, 200.0);
+        let row = k.row_rect(body);
+        assert_eq!(row.min.y, 32.0);
+        assert_eq!(row.height(), 48.0);
+        // Fillet muat di dalam window.
+        assert!(k.hit_rect(body).min.x >= 0.0 && k.hit_rect(body).max.x <= ws.x);
+        assert_eq!(k.window_size(100.0).y, ws.y + 100.0);
     }
 
     #[test]
-    fn pill_sizes_and_debug_extra() {
-        let k = Kind::Pill;
-        assert_eq!(k.body_rect(Pos2::ZERO, 600.0, 0.0).size(), PILL_COLLAPSED);
-        assert_eq!(k.body_rect(Pos2::ZERO, 600.0, 1.0).size(), PILL_EXPANDED);
-        assert_eq!(k.window_size(100.0).y, k.window_size(0.0).y + 100.0);
+    fn cubic_bezier_endpoints_and_shape() {
+        assert!(shape_ease(0.0).abs() < 1e-4);
+        assert!((shape_ease(1.0) - 1.0).abs() < 1e-4);
+        // Kurva cepat di awal: separuh waktu sudah jauh lewat separuh jalan.
+        assert!(shape_ease(0.5) > 0.8);
+        // linear(0,0,1,1) = identitas
+        assert!((cubic_bezier(0.0, 0.0, 1.0, 1.0, 0.3) - 0.3).abs() < 1e-3);
+    }
+
+    #[test]
+    fn open_grows_shape_then_fades_content_in() {
+        let mut tr = Transition::new(false, 0.0);
+        tr.set(true, 100.0);
+        let f = tr.frame(100.1); // 100 ms
+        assert!(f.shape > 0.0 && f.shape < 1.0);
+        assert_eq!(f.content, 0.0, "isi baru mulai setelah delay 120 ms");
+        let f = tr.frame(100.3); // 300 ms: bentuk final, isi ~100%
+        assert!((f.shape - 1.0).abs() < 1e-3);
+        assert!((f.content - 1.0).abs() < 1e-3);
+        assert!(f.settled);
+    }
+
+    #[test]
+    fn close_fades_content_out_before_shrinking() {
+        let mut tr = Transition::new(true, 0.0);
+        tr.set(false, 50.0);
+        let f = tr.frame(50.1); // 100 ms
+        assert!(f.content < 0.3);
+        assert_eq!(f.shape, 1.0, "bentuk belum menyusut selama isi fade-out");
+        let f = tr.frame(50.5);
+        assert!(f.shape < 1e-3 && f.content == 0.0 && f.settled);
+    }
+
+    #[test]
+    fn reversal_continues_from_current_value() {
+        let mut tr = Transition::new(false, 0.0);
+        tr.set(true, 10.0);
+        let mid = tr.frame(10.1).shape;
+        tr.set(false, 10.1);
+        assert!((tr.frame(10.1).shape - mid).abs() < 1e-4);
+    }
+
+    #[test]
+    fn equalizer_flat_when_not_playing() {
+        assert_eq!(equalizer_heights(false, 3.0), [2.0; 3]);
+        for t in [0.0, 0.4, 1.3, 7.7] {
+            for h in equalizer_heights(true, t) {
+                assert!((2.0..=11.0).contains(&h));
+            }
+        }
     }
 
     #[test]
     fn parses_fake_notch() {
-        assert_eq!(
-            parse_fake("185x32"),
-            Some(NotchMetrics {
-                width: 185.0,
-                height: 32.0
-            })
-        );
+        assert_eq!(parse_fake("200x32"), Some(M));
         assert_eq!(parse_fake("abc"), None);
     }
 
     #[test]
-    fn easing_and_fade() {
-        assert_eq!(ease(0.0), 0.0);
-        assert_eq!(ease(1.0), 1.0);
-        assert!((ease(0.5) - 0.5).abs() < 1e-6);
-        assert_eq!(text_alpha(0.3), 0.0);
-        assert_eq!(text_alpha(1.0), 1.0);
-        assert!(notch_bottom_radius(0.0) < notch_bottom_radius(1.0));
-    }
-
-    #[test]
     fn fillet_mesh_spans_from_top_edge_to_side() {
-        let corner = pos2(100.0, 0.0);
-        let m = fillet_mesh(corner, 6.0, -1.0, Color32::BLACK);
+        let m = fillet_mesh(pos2(100.0, 0.0), 10.0, -1.0, Color32::BLACK);
         let first = m.vertices[1].pos;
         let last = m.vertices.last().unwrap().pos;
-        assert!((first - pos2(94.0, 0.0)).length() < 1e-4);
-        assert!((last - pos2(100.0, 6.0)).length() < 1e-4);
-        // Semua titik busur di dalam persegi telinga.
-        for v in &m.vertices {
-            assert!(v.pos.x >= 94.0 - 1e-4 && v.pos.x <= 100.0 + 1e-4);
-            assert!(v.pos.y >= -1e-4 && v.pos.y <= 6.0 + 1e-4);
-        }
-        let right = fillet_mesh(pos2(200.0, 0.0), 6.0, 1.0, Color32::BLACK);
-        assert!((right.vertices[1].pos - pos2(206.0, 0.0)).length() < 1e-4);
+        assert!((first - pos2(90.0, 0.0)).length() < 1e-4);
+        assert!((last - pos2(100.0, 10.0)).length() < 1e-4);
+        let right = fillet_mesh(pos2(200.0, 0.0), 10.0, 1.0, Color32::BLACK);
+        assert!((right.vertices[1].pos - pos2(210.0, 0.0)).length() < 1e-4);
     }
 }

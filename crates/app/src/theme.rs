@@ -45,6 +45,11 @@ pub struct TextStyle {
 }
 
 impl TextStyle {
+    /// Teks regular tanpa letter spacing, tinggi baris = ukuran font.
+    pub const fn plain(size: f32) -> Self {
+        Self::new(size, 400.0, size)
+    }
+
     const fn new(size: f32, weight: f32, line_height: f32) -> Self {
         Self {
             size,
@@ -197,17 +202,110 @@ pub const LINE_SHIFT_FROM_ALPHA: f32 = 0.4;
 pub const LOADING_STEP: f32 = 0.30;
 
 // ---------------------------------------------------------------------------
-// Mode Notch (arah gaya D, tidak berubah di putaran ini)
+// Mode Notch (arah gaya D · Notch mode, putaran 2)
 // ---------------------------------------------------------------------------
+//
+// collapsed 272×32 r-bawah 10 · expanded 560×80 r-bawah 18 · fillet atas 10 ·
+// aktif 20/600 #FFFFFF α0.45 → fill #FFD64D · telinga 11/500 #FFFFFF α0.55 ·
+// pill 520×44 r22 (collapsed 112×26 r13).
 
-pub const NOTCH_TEXT: TextStyle = TextStyle::new(17.0, 600.0, 26.0);
-pub const NOTCH_BASE: Tint = Tint::new(0xFFFFFF, 0.55);
-pub const NOTCH_FILL: Tint = Tint::new(0xFFD64D, 1.0);
-pub const NOTCH_HINT_TEXT: TextStyle = TextStyle::new(15.0, 400.0, 20.0);
-pub const NOTCH_HINT_COLOR: Tint = Tint::new(0xFFFFFF, 0.55);
-pub const NOTCH_STATUS_TEXT: TextStyle = TextStyle::new(14.0, 400.0, 20.0);
-pub const NOTCH_STATUS_COLOR: Tint = Tint::new(0xFFFFFF, 0.80);
-pub const NOTCH_EXPAND: f32 = 0.35;
+/// Latar bentuk: hitam pekat.
+pub const NOTCH_BG: Tint = Tint::new(0x000000, 1.0);
+/// Radius inverse fillet di sudut atas (notch & pill).
+pub const NOTCH_TOP_FILLET: f32 = 10.0;
+/// Collapsed: lebar notch + telinga kecil 36 px di tiap sisi (200 → 272).
+pub const NOTCH_COLLAPSED_EAR: f32 = 36.0;
+/// Expanded: lebar 560, telinga minimal 180 di tiap sisi kamera.
+pub const NOTCH_EXPANDED_WIDTH: f32 = 560.0;
+pub const NOTCH_MIN_EAR: f32 = 180.0;
+/// Baris lirik/status di bawah pita kamera.
+pub const NOTCH_ROW_HEIGHT: f32 = 48.0;
+pub const NOTCH_RADIUS_COLLAPSED: f32 = 10.0;
+pub const NOTCH_RADIUS_EXPANDED: f32 = 18.0;
+/// Pill (layar tanpa notch & Windows).
+pub const PILL_COLLAPSED: Vec2 = vec2(112.0, 26.0);
+pub const PILL_EXPANDED: Vec2 = vec2(520.0, 44.0);
+pub const PILL_RADIUS_COLLAPSED: f32 = 13.0;
+pub const PILL_RADIUS_EXPANDED: f32 = 22.0;
+/// Jarak ♪ dan equalizer di pill collapsed.
+pub const PILL_COLLAPSED_GAP: f32 = 8.0;
+
+/// Baris aktif: 20/600, putih α0.45 terisi kuning dari kiri.
+pub const NOTCH_ACTIVE_TEXT: TextStyle = TextStyle::new(20.0, 600.0, 26.0);
+pub const NOTCH_ACTIVE_BASE: Tint = Tint::new(0xFFFFFF, 0.45);
+pub const NOTCH_ACTIVE_FILL: Tint = Tint::new(0xFFD64D, 1.0);
+/// Padding kiri/kanan baris lirik (lebar teks maksimum = lebar − 40).
+pub const NOTCH_ROW_PAD_X: f32 = 20.0;
+/// Aksen kuning (equalizer, ❚❚, titik loading, offset).
+pub const NOTCH_ACCENT: Tint = Tint::new(0xFFD64D, 1.0);
+
+/// Telinga: judul (kiri) dan artis · posisi (kanan).
+pub const EAR_TEXT: TextStyle = TextStyle::new(11.0, 500.0, 14.0);
+pub const EAR_COLOR: Tint = Tint::new(0xFFFFFF, 0.55);
+/// Padding telinga ke tepi panel (expanded) / ke ikon (collapsed).
+pub const EAR_PAD: f32 = 16.0;
+pub const EAR_PAD_COLLAPSED: f32 = 12.0;
+pub const EAR_GAP_LEFT: f32 = 6.0;
+pub const EAR_GAP_RIGHT: f32 = 8.0;
+/// ♪ di telinga kiri saat collapsed.
+pub const NOTE_SIZE: f32 = 13.0;
+pub const NOTE_COLOR: Tint = Tint::new(0xFFFFFF, 0.70);
+
+/// Equalizer: 3 bar 2.5 px, jarak 2, tinggi 6/11/8 (diam: 2 px).
+pub const EQ_BAR_WIDTH: f32 = 2.5;
+pub const EQ_BAR_GAP: f32 = 2.0;
+pub const EQ_HEIGHTS: [f32; 3] = [6.0, 11.0, 8.0];
+pub const EQ_MAX_HEIGHT: f32 = 11.0;
+pub const EQ_FLAT_HEIGHT: f32 = 2.0;
+/// Kecepatan ayunan tiap bar (rad/detik).
+pub const EQ_SPEEDS: [f64; 3] = [7.3, 9.1, 6.2];
+/// ❚❚ kecil di telinga kiri saat dijeda.
+pub const NOTCH_PAUSE_BAR: Vec2 = vec2(2.5, 10.0);
+pub const NOTCH_PAUSE_GAP: f32 = 2.0;
+
+/// Status satu baris: [ikon] judul 15/600 + sub 12/400.
+pub const NOTCH_STATUS_MAIN_TEXT: TextStyle = TextStyle::new(15.0, 600.0, 20.0);
+pub const NOTCH_STATUS_MAIN_COLOR: Tint = Tint::new(0xFFFFFF, 0.90);
+pub const NOTCH_STATUS_SUB_TEXT: TextStyle = TextStyle::new(12.0, 400.0, 16.0);
+pub const NOTCH_STATUS_SUB_COLOR: Tint = Tint::new(0xFFFFFF, 0.50);
+pub const NOTCH_STATUS_GAP: f32 = 8.0;
+/// Titik loading kuning: α1 / α0.55 / α0.25, yang paling terang berpindah.
+pub const NOTCH_LOADING_ALPHAS: [f32; 3] = [1.0, 0.55, 0.25];
+pub const NOTCH_NOT_FOUND_COLOR: Tint = Tint::new(0xFFFFFF, 0.60);
+
+/// Opacity isi saat lagu dijeda.
+pub const NOTCH_PAUSED_OPACITY: f32 = 0.45;
+/// Opacity isi saat kursor mendekat dan click-through mati (panel tidak
+/// kempis, isinya meredup).
+pub const NOTCH_NEAR_OPACITY: f32 = 0.25;
+/// Zona di sekitar panel expanded tempat kursor dianggap "mendekat".
+pub const NOTCH_NEAR_ZONE: f32 = 48.0;
+/// Click-through aktif: kursor mendekat → panel kempis (cepat), kursor pergi
+/// → mekar lagi setelah jeda ini.
+pub const NOTCH_REOPEN_DELAY: f32 = 0.6;
+
+/// Transisi collapsed ↔ expanded (milidetik), cubic-bezier(0.32,0.72,0,1).
+pub const NOTCH_SHAPE_MS: f32 = 280.0;
+pub const NOTCH_CONTENT_IN_MS: f32 = 180.0;
+pub const NOTCH_CONTENT_DELAY_MS: f32 = 120.0;
+pub const NOTCH_CONTENT_OUT_MS: f32 = 120.0;
+
+/// Kontrol hover di telinga (click-through mati): − offset + di kiri,
+/// cari lirik lain di kanan. Tombol bulat 22×22.
+pub const EAR_BUTTON_SIZE: f32 = 22.0;
+pub const EAR_BUTTON_BG: Tint = Tint::new(0xFFFFFF, 0.12);
+pub const EAR_BUTTON_HOVER_BG: Tint = Tint::new(0xFFFFFF, 0.22);
+pub const EAR_BUTTON_ICON: Tint = Tint::new(0xFFFFFF, 1.0);
+pub const EAR_BUTTON_GAP: f32 = 4.0;
+pub const EAR_OFFSET_MIN_WIDTH: f32 = 62.0;
+
+/// Overlay debug di dalam panel notch (di bawah baris lirik).
+pub const NOTCH_DEBUG_MARGIN: Vec2 = vec2(14.0, 12.0);
+pub const NOTCH_DEBUG_PAD_TOP: f32 = 8.0;
+pub const NOTCH_DEBUG_DIVIDER: Tint = Tint::new(0xFFFFFF, 0.10);
+pub const NOTCH_DEBUG_KEY_COLOR: Tint = Tint::new(0xFFD64D, 0.70);
+pub const NOTCH_DEBUG_HEIGHT: f32 =
+    NOTCH_DEBUG_PAD_TOP + DEBUG_MAX_ROWS as f32 * DEBUG_ROW_HEIGHT + NOTCH_DEBUG_MARGIN.y;
 
 // ---------------------------------------------------------------------------
 // Ikon tray (grid 16 px, dirender 2× jadi 32×32)
