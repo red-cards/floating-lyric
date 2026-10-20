@@ -10,7 +10,9 @@ Tips umum:
 - Kalau ada yang aneh, lampirkan isi `mini-lyrics.log` (tray → **Buka folder
   log**) dan teks versi/commit di baris pertama menu tray.
 - `MINI_LYRICS_DEMO=1` menjalankan lagu & lirik palsu untuk cek UI tanpa
-  Spotify/jaringan.
+  Spotify/jaringan (termasuk baris Jepang/Korea/Mandarin dan satu baris
+  sangat panjang). Untuk state lain: `MINI_LYRICS_DEMO=paused`, `loading`,
+  `notfound`, `error`, `idle`.
 
 ## Persiapan
 
@@ -18,7 +20,7 @@ Tips umum:
 |---|---|---|
 | App terbuka tanpa error (macOS: setelah `xattr -dr com.apple.quarantine`; Windows: SmartScreen → Run anyway) | ☐ | ☐ |
 | Tidak ada ikon di Dock (macOS) / taskbar (Windows) | ☐ | ☐ |
-| Ikon not kuning muncul di menu bar / tray | ☐ | ☐ |
+| Ikon tray (kotak + dua garis) muncul di menu bar / tray; Windows: warnanya kontras dengan taskbar terang/gelap | ☐ | ☐ |
 | Label versi + commit di menu tray sesuai PR | ☐ | ☐ |
 | macOS: prompt izin Automation untuk Spotify muncul & diizinkan | ☐ | – |
 | Tanpa lagu diputar: tampil "Putar lagu dulu ♪" | ☐ | ☐ |
@@ -27,12 +29,12 @@ Tips umum:
 
 | Skenario | Yang diharapkan | macOS | Windows |
 |---|---|---|---|
-| Putar lagu populer | "Nyari lirik…" lalu lirik muncul; baris aktif terisi kuning dari kiri seirama | ☐ | ☐ |
+| Putar lagu populer | "Nyari lirik…" lalu lirik muncul; baris aktif terisi putih penuh dari kiri seirama | ☐ | ☐ |
 | Ganti lagu (next/prev) | Lirik berganti ≤ ~1–2 dtk; tidak pernah menampilkan lirik lagu sebelumnya | ☐ | ☐ |
 | Kembali ke lagu sebelumnya | Lirik langsung muncul (cache), tanpa "Nyari lirik…" lama | ☐ | ☐ |
 | Seek maju | Baris lompat ke posisi baru ≤ ~1 dtk | ☐ | ☐ |
 | Seek mundur | Sama seperti di atas | ☐ | ☐ |
-| Pause | Lirik meredup dan berhenti bergerak | ☐ | ☐ |
+| Pause | Seluruh panel meredup (±45%), tanda ❚❚ di kiri, lirik berhenti bergerak | ☐ | ☐ |
 | Resume setelah pause lama (> 30 dtk) | Lanjut dari posisi yang benar (tidak loncat ke depan) | ☐ | ☐ |
 | Lagu tanpa lirik sinkron (mis. lagu indie/instrumental) | "Lirik sinkron nggak ketemu" + judul — artis | ☐ | ☐ |
 | Judul dengan "- Remastered"/"(feat. …)" | Tetap ketemu lewat fallback search | ☐ | ☐ |
@@ -55,6 +57,12 @@ Tips umum:
 |---|---|---|---|
 | Posisi awal (tanpa setting) | Tengah bawah monitor utama | ☐ | ☐ |
 | Drag panel | Window pindah; editor tidak kehilangan fokus (Windows) | ☐ | ☐ |
+| Kursor di atas panel (click-through mati) | Muncul `− Sinkron +` (kiri atas) dan `Lirik lain` (kanan atas); hilang lagi saat kursor keluar | ☐ | ☐ |
+| Klik `+` / `−` di panel | Offset berubah 0,5 dtk, label menunjukkan offset, menu tray ikut berubah; klik label = reset | ☐ | ☐ |
+| Klik `Lirik lain` pada lagu yang liriknya salah | "Nyari lirik lain…" lalu lirik berganti; `‹ 2/N ›` untuk pindah antar kandidat, bisa kembali ke hasil awal | ☐ | ☐ |
+| `Lirik lain` saat "Lirik sinkron nggak ketemu" | Kalau ada kandidat, lirik tampil; kalau tidak, "Nggak ada lirik lain" | ☐ | ☐ |
+| Tray → Coba lirik lain (mis. mode Notch / click-through) | Sama dengan tombol `Lirik lain` | ☐ | ☐ |
+| Klik tombol panel | Tidak ikut men-drag window | ☐ | ☐ |
 | Restart app | Posisi, offset, click-through, debug tetap seperti sebelumnya | ☐ | ☐ |
 | Mengetik di editor sambil lirik jalan | Fokus tetap di editor | ☐ | ☐ |
 | App lain full-screen (VS Code/browser full-screen, video) | Lirik tetap di atas (kalau tidak: catat sebagai known issue) | ☐ | ☐ |

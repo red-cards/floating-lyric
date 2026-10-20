@@ -72,6 +72,33 @@ pub struct LyricLine {
     pub text: String,
 }
 
+/// Satu kandidat lirik alternatif (mis. hasil pencarian LRCLIB lain) yang
+/// bisa dipilih user kalau lirik yang ketemu tidak cocok.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LyricsCandidate {
+    /// ID record di sumber lirik (LRCLIB), kalau ada.
+    pub id: Option<i64>,
+    /// Label singkat untuk UI/log, mis. "Judul — Artis · 3:51".
+    pub label: String,
+    pub lines: Vec<LyricLine>,
+}
+
+/// Label kandidat: "Judul — Artis · m:ss" (bagian kosong dilewati).
+pub fn candidate_label(title: &str, artist: &str, duration_secs: Option<f64>) -> String {
+    let mut out = title.trim().to_string();
+    if !artist.trim().is_empty() {
+        if !out.is_empty() {
+            out.push_str(" — ");
+        }
+        out.push_str(artist.trim());
+    }
+    if let Some(d) = duration_secs.filter(|d| *d > 0.0) {
+        let s = d.round() as u64;
+        out.push_str(&format!(" · {}:{:02}", s / 60, s % 60));
+    }
+    out
+}
+
 /// Hasil satu kali percobaan mengambil lirik.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FetchOutcome {

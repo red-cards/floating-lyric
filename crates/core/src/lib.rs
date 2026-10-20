@@ -12,5 +12,8 @@ pub mod lrclib;
 pub mod model;
 pub mod wintime;
 
-pub use controller::{LyricsController, LyricsProvider, LyricsView};
-pub use model::{FetchOutcome, LyricLine, LyricsStatus, PlayerState, TrackQuery};
+pub use controller::{Alternatives, LyricsController, LyricsProvider, LyricsView};
+pub use model::{
+    candidate_label, FetchOutcome, LyricLine, LyricsCandidate, LyricsStatus, PlayerState,
+    TrackQuery,
+};

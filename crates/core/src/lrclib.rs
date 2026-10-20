@@ -5,7 +5,7 @@ use std::time::Duration;
 use serde::Deserialize;
 
 use crate::lrc::parse_lrc;
-use crate::model::{FetchOutcome, TrackQuery};
+use crate::model::{candidate_label, FetchOutcome, LyricsCandidate, TrackQuery};
 
 pub const BASE_URL: &str = "https://lrclib.net";
 
@@ -82,6 +82,46 @@ pub fn pick_best(records: &[LrclibRecord], duration_secs: f64) -> Option<&Lrclib
     })
 }
 
+/// Batas jumlah kandidat alternatif yang ditawarkan ke user.
+pub const MAX_CANDIDATES: usize = 10;
+
+/// Urutkan hasil pencarian jadi kandidat lirik: hanya yang punya lirik
+/// sinkron, tanpa duplikat (id atau isi lirik sama), durasi paling dekat ke
+/// `duration_secs` di depan (yang durasinya tidak diketahui di belakang).
+pub fn rank_candidates(records: &[LrclibRecord], duration_secs: f64) -> Vec<LyricsCandidate> {
+    let distance = |r: &LrclibRecord| match (r.duration, duration_secs > 0.0) {
+        (Some(d), true) => (d - duration_secs).abs(),
+        _ => f64::MAX,
+    };
+    let mut synced: Vec<&LrclibRecord> = records.iter().filter(|r| r.synced().is_some()).collect();
+    // Stabil: urutan relevansi dari LRCLIB dipertahankan untuk jarak sama.
+    synced.sort_by(|a, b| distance(a).total_cmp(&distance(b)));
+
+    let mut out: Vec<LyricsCandidate> = Vec::new();
+    for r in synced {
+        if r.id.is_some() && out.iter().any(|c| c.id == r.id) {
+            continue;
+        }
+        let lines = parse_lrc(r.synced().unwrap_or_default());
+        if lines.is_empty() || out.iter().any(|c| c.lines == lines) {
+            continue;
+        }
+        out.push(LyricsCandidate {
+            id: r.id,
+            label: candidate_label(
+                r.track_name.as_deref().unwrap_or_default(),
+                r.artist_name.as_deref().unwrap_or_default(),
+                r.duration,
+            ),
+            lines,
+        });
+        if out.len() >= MAX_CANDIDATES {
+            break;
+        }
+    }
+    out
+}
+
 /// Klien HTTP blocking untuk LRCLIB.
 ///
 /// reqwest otomatis membaca proxy dari env `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`
@@ -142,11 +182,20 @@ impl LrclibClient {
 
     /// Langkah 2: `/api/search` dengan judul yang sudah dibersihkan.
     pub fn search(&self, title: &str, artist: &str) -> Result<Vec<LrclibRecord>, String> {
+        self.search_with(&[("track_name", title), ("artist_name", artist)])
+    }
+
+    /// Pencarian bebas (`/api/search?q=`), untuk artis yang ejaannya beda.
+    pub fn search_free(&self, text: &str) -> Result<Vec<LrclibRecord>, String> {
+        self.search_with(&[("q", text)])
+    }
+
+    fn search_with(&self, params: &[(&str, &str)]) -> Result<Vec<LrclibRecord>, String> {
         let url = format!("{}/api/search", self.base_url);
         let resp = self
             .http
             .get(&url)
-            .query(&[("track_name", title), ("artist_name", artist)])
+            .query(params)
             .send()
             .map_err(|e| format!("GET {url}: {}", error_chain(&e)))?;
         let status = resp.status();
@@ -184,6 +233,29 @@ impl LrclibClient {
                 .unwrap_or(FetchOutcome::NotFound),
             Err(e) => FetchOutcome::NetworkError(e),
         }
+    }
+}
+
+impl LrclibClient {
+    /// Kandidat lirik lain untuk lagu ini (dipakai saat user menekan "Lirik
+    /// lain"): pencarian judul + artis, ditambah pencarian bebas judul.
+    pub fn alternatives(&self, q: &TrackQuery) -> Result<Vec<LyricsCandidate>, String> {
+        let title = clean_title(&q.title);
+        if title.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut records = self.search(&title, &q.artist)?;
+        let free = if q.artist.trim().is_empty() {
+            title.clone()
+        } else {
+            format!("{title} {}", q.artist)
+        };
+        match self.search_free(&free) {
+            Ok(more) => records.extend(more),
+            // Hasil pencarian pertama sudah cukup kalau yang kedua gagal.
+            Err(e) => log::warn!("pencarian bebas LRCLIB gagal: {e}"),
+        }
+        Ok(rank_candidates(&records, q.duration_secs))
     }
 }
 
@@ -232,6 +304,32 @@ mod tests {
     #[test]
     fn clean_title_never_returns_empty() {
         assert_eq!(clean_title(" - Intro"), "- Intro");
+    }
+
+    #[test]
+    fn rank_candidates_sorts_and_dedupes() {
+        let rs = vec![
+            rec(1, Some(200.0), Some("[00:01.00]a")),
+            rec(2, Some(181.0), None),
+            rec(3, Some(185.0), Some("[00:01.00]b")),
+            rec(3, Some(185.0), Some("[00:01.00]b")), // id sama
+            rec(5, Some(190.0), Some("[00:01.00]b")), // isi sama dengan 3
+            rec(6, None, Some("[00:01.00]c")),
+            rec(7, Some(179.0), Some("bukan lrc")),
+        ];
+        let ids: Vec<_> = rank_candidates(&rs, 180.0).iter().map(|c| c.id).collect();
+        assert_eq!(ids, vec![Some(3), Some(1), Some(6)]);
+    }
+
+    #[test]
+    fn rank_candidates_label() {
+        let mut r = rec(1, Some(231.4), Some("[00:01.00]a"));
+        r.track_name = Some("Lampu Kota".into());
+        r.artist_name = Some("Nadia Rana".into());
+        assert_eq!(
+            rank_candidates(&[r], 0.0)[0].label,
+            "Lampu Kota — Nadia Rana · 3:51"
+        );
     }
 
     fn rec(id: i64, duration: Option<f64>, synced: Option<&str>) -> LrclibRecord {

@@ -7,6 +7,7 @@ mod notch;
 mod now_playing;
 mod os_window;
 mod settings;
+mod theme;
 mod tray;
 mod ui;
 

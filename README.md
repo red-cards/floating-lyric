@@ -7,7 +7,8 @@ tanpa Node/web), jalan di **macOS** dan **Windows**.
 - Baca lagu yang sedang diputar (Spotify di macOS; semua player di media
   overlay Windows, termasuk Spotify Web/YouTube Music di browser).
 - Ambil lirik sinkron dari [LRCLIB](https://lrclib.net) (gratis, tanpa API key).
-- Tampil 3 baris dengan efek karaoke kuning, always on top, tidak mencuri fokus
+- Tampil 3 baris dengan efek karaoke (gaya "Kalem": putih redup terisi putih
+  penuh dari kiri), always on top, tidak mencuri fokus
   editor, bisa click-through, atur offset dari tray.
 
 ## Cara pakai tanpa build (dari artifact CI)
@@ -33,7 +34,8 @@ tanpa Node/web), jalan di **macOS** dan **Windows**.
      ("MiniLyrics ingin mengontrol Spotify") → **OK**. Kalau terlanjur ditolak:
      System Settings → Privacy & Security → Automation → MiniLyrics → centang
      Spotify.
-3. Putar lagu. Ikon not kuning muncul di tray (Windows) / menu bar (macOS) —
+3. Putar lagu. Ikon panel lirik (kotak dengan dua garis) muncul di tray
+   (Windows) / menu bar (macOS) —
    semua pengaturan ada di menunya.
 
 > **Windows:** semua player yang muncul di media overlay Windows ikut terbaca,
@@ -45,15 +47,24 @@ tanpa Node/web), jalan di **macOS** dan **Windows**.
 | Menu | Fungsi |
 |---|---|
 | `MiniLyrics v… (sha)` | Versi + commit build (untuk laporan bug) |
-| Tampilan: Panel bawah / Notch | Pilih mode tampilan (lihat di bawah); tersimpan di setting |
-| Sembunyikan/Tampilkan lirik | Window tetap ada tapi tidak menggambar apa pun & tembus klik |
+| Sembunyikan/Tampilkan lirik | Window tetap ada tapi tidak menggambar apa pun & tembus klik; ikon tray meredup |
 | Click-through | Klik tembus ke window di bawahnya (tidak bisa di-drag). Disimpan terpisah per mode; mode Notch default aktif |
+| Mode tampilan: Notch / Panel bawah | Pilih mode tampilan (lihat di bawah); tersimpan di setting |
 | Lirik lebih cepat / lebih lambat 0,5 dtk, Reset offset | Koreksi sinkron |
+| Coba lirik lain | Lirik yang ketemu salah lagu/versi: cari kandidat lain di LRCLIB dan pindah ke berikutnya |
 | Mode debug | Overlay info: sumber, posisi mentah/interpolasi, offset, status & latency LRCLIB, umur sampel |
 | Buka folder log | Buka folder log di Explorer/Finder |
 | Keluar | |
 
-Window bisa dipindah dengan drag (tombol kiri) di panel lirik. Posisi, offset,
+Window bisa dipindah dengan drag (tombol kiri) di panel lirik. Saat kursor di
+atas panel (click-through mati) muncul dua kontrol kecil:
+
+- **Kiri atas `− Sinkron +`**: geser lirik 0,5 dtk (`+` = lirik lebih cepat).
+  Kalau offset tidak nol, labelnya jadi offset sekarang; klik untuk reset.
+- **Kanan atas `Lirik lain`**: cari kandidat lirik lain (pencarian LRCLIB yang
+  lebih luas, urut dari durasi paling cocok), lalu pindah dengan `‹ 2/5 ›`.
+  Juga muncul saat "Lirik sinkron nggak ketemu". Pilihan diingat per lagu
+  selama app jalan. Posisi, offset,
 click-through, mode tampilan, dan mode debug tersimpan otomatis.
 
 ### Mode tampilan
@@ -112,6 +123,7 @@ Ringkasnya:
 git clone https://github.com/red-cards/floating-lyric.git && cd floating-lyric
 cargo run -p mini-lyrics                       # jalankan (debug)
 MINI_LYRICS_DEMO=1 cargo run -p mini-lyrics    # demo: lagu & lirik palsu
+MINI_LYRICS_DEMO=paused cargo run -p mini-lyrics   # state lain: paused, loading, notfound, error, idle
 cargo test --workspace                         # semua test
 cargo build --release -p mini-lyrics           # → target/release/mini-lyrics(.exe)
 scripts/bundle-macos.sh                        # macOS: → dist/MiniLyrics.app
