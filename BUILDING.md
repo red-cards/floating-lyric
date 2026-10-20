@@ -96,21 +96,21 @@ Variabel env yang berguna saat development:
 | Variabel | Fungsi |
 |---|---|
 | `MINI_LYRICS_DEMO=1` | Lagu & lirik palsu yang berulang: cek UI tanpa Spotify/jaringan |
-| `MINI_LYRICS_FAKE_NOTCH=185x32` | Paksa bentuk notch (lebar x tinggi, points) di mode Notch, untuk layar tanpa notch/Windows |
+| `MINI_LYRICS_FAKE_NOTCH=200x32` | Paksa bentuk notch (lebar x tinggi, points) di mode Notch, untuk layar tanpa notch/Windows |
 | `HTTPS_PROXY=http://host:port` | Proxy untuk request LRCLIB |
 
 macOS / Linux (bash/zsh):
 
 ```sh
 MINI_LYRICS_DEMO=1 cargo run -p mini-lyrics
-MINI_LYRICS_DEMO=1 MINI_LYRICS_FAKE_NOTCH=185x32 cargo run -p mini-lyrics
+MINI_LYRICS_DEMO=1 MINI_LYRICS_FAKE_NOTCH=200x32 cargo run -p mini-lyrics
 ```
 
 Windows PowerShell (berlaku untuk sesi terminal itu):
 
 ```powershell
 $env:MINI_LYRICS_DEMO = "1"; cargo run -p mini-lyrics
-$env:MINI_LYRICS_FAKE_NOTCH = "185x32"; cargo run -p mini-lyrics
+$env:MINI_LYRICS_FAKE_NOTCH = "200x32"; cargo run -p mini-lyrics
 Remove-Item Env:MINI_LYRICS_DEMO, Env:MINI_LYRICS_FAKE_NOTCH   # matikan lagi
 ```
 

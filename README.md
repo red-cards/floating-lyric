@@ -71,20 +71,31 @@ click-through, mode tampilan, dan mode debug tersimpan otomatis.
 
 - **Panel bawah** (default): panel semi-transparan 3 baris (sebelumnya, aktif,
   berikutnya), bisa di-drag, posisi tersimpan.
-- **Notch**: satu baris lirik yang "keluar" dari notch, ala Dynamic Island.
-  - **Mac ber-notch:** bentuk hitam pekat digambar persis di atas notch kamera
-    (sudut atas inverse fillet, sudut bawah membulat) di tengah atas layar, di
-    atas menu bar. Saat lagu diputar bentuknya memanjang ke bawah (animasi
-    tinggi + fade) dan lirik tampil di bawah area kamera; saat pause/tidak ada
-    lagu kembali collapsed menyatu dengan notch.
-  - **Layar tanpa notch & Windows:** pill hitam di tengah atas dengan perilaku
-    yang sama (collapsed = pill kecil).
-  - Click-through aktif secara default. Saat kursor masuk area panel, panel
-    meredup supaya yang di bawahnya (menu bar, tab browser) tetap terlihat.
+- **Notch** (desain gaya D): panel hitam pekat yang tumbuh dari notch fisik.
+  - **Expanded** (560×80): "telinga" di kiri & kanan kamera berisi judul
+    (kiri) dan artis · posisi + equalizer kuning (kanan), lalu satu baris lirik
+    karaoke 20/600 putih redup → kuning `#FFD64D`. Area kamera selalu kosong.
+    Sudut atas melengkung ke dalam menyatu dengan tepi layar, sudut bawah r18.
+  - **Collapsed** (lebar notch + 72, mis. 272×32): ♪ di kiri, equalizer di
+    kanan (diam saat lagu dijeda/belum diputar). Dijeda: ❚❚ kuning, lirik &
+    telinga meredup ke 45%.
+  - **Kursor mendekat** (zona 48 px): kalau click-through aktif, panel kempis
+    ke collapsed lalu mekar lagi 600 ms setelah kursor pergi. Kalau
+    click-through mati, panel tidak kempis tapi isinya meredup ke 25%; saat
+    kursor di atas panel, telinga berganti jadi kontrol `− offset +` (kiri)
+    dan cari lirik lain (kanan).
+  - Transisi: lebar & tinggi tumbuh bersamaan 280 ms
+    (`cubic-bezier(0.32, 0.72, 0, 1)`), isi fade-in 180 ms setelah 120 ms;
+    menutup kebalikannya.
+  - Status (loading, tidak ketemu, error, belum diputar) tampil satu baris di
+    tempat lirik; mode debug memanjangkan panel ke bawah.
+  - **Layar tanpa notch & Windows:** pill hitam 520×44 r22 menggantung dari
+    tepi atas tengah layar (collapsed 112×26) dengan perilaku yang sama.
+  - Click-through aktif secara default.
   - Multi monitor: tampil di layar yang punya notch; kalau tidak ada, di layar
     utama. Posisi dicek ulang tiap 2 detik (colok/cabut monitor).
   - Ngetes bentuk notch di layar tanpa notch:
-    `MINI_LYRICS_FAKE_NOTCH=185x32` (lebar x tinggi, points).
+    `MINI_LYRICS_FAKE_NOTCH=200x32` (lebar x tinggi, points).
 
 ### Lokasi file
 
@@ -140,7 +151,7 @@ Windows PowerShell: `$env:MINI_LYRICS_DEMO = "1"; cargo run -p mini-lyrics`.
 | `crates/app/src/ui.rs` | UI egui: panel, 3 baris, karaoke, status, drag, overlay debug |
 | `crates/app/src/now_playing/` | Thread poller 1 dtk; `macos.rs` (osascript), `windows.rs` (SMTC), `demo.rs` |
 | `crates/app/src/tray.rs` | Ikon (RGBA dari kode) & menu tray |
-| `crates/app/src/notch.rs` | Geometri, path bentuk notch/pill, easing animasi mode Notch |
+| `crates/app/src/notch.rs` | Mode Notch gaya D: geometri notch/pill & telinga, path bentuk (inverse fillet), transisi collapsed ↔ expanded, equalizer |
 | `crates/app/src/os_window.rs` | NSWindow (macOS) / extended style HWND (Windows), deteksi notch (`NSScreen.safeAreaInsets`, `auxiliaryTopLeft/RightArea`), penempatan tengah atas, posisi kursor global |
 | `crates/app/src/fonts.rs` | Font fallback sistem untuk CJK & simbol |
 | `crates/app/src/settings.rs`, `logging.rs` | Setting JSON, log berotasi |
@@ -178,9 +189,9 @@ saat playing dan ~250 ms saat idle.
   macOS tetap memaksa frame turun ke bawah menu bar, log mencatat
   `frame window di-constrain` beserta frame yang diminta & yang didapat.
   Deteksi notch butuh macOS 12+; di macOS 11 otomatis jadi pill.
-- **Mode Notch – Windows:** pill di tengah atas monitor utama bisa menutupi
-  bagian atas window yang dimaximize (tab/judul); click-through (default aktif)
-  membuat klik tetap tembus. Kalau click-through dimatikan, area transparan di
+- **Mode Notch – Windows:** pill menempel di tepi atas monitor utama dan bisa
+  menutupi bagian tengah title bar/tab window yang dimaximize; click-through
+  (default aktif) membuat klik tetap tembus. Kalau click-through dimatikan, area transparan di
   sekitar pill ikut menahan klik.
 - **Windows – Spotify & posisi:** Spotify jarang memperbarui posisi di SMTC, jadi
   posisi dihitung dari `LastUpdatedTime`. Kalau resume dari pause tanpa update

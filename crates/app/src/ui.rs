@@ -335,7 +335,7 @@ impl MiniLyricsApp {
             kind,
             debug: self.settings.debug,
         };
-        let size = kind.window_size(self.debug_height());
+        let size = kind.window_size(self.notch_debug_height());
         if let Some(w) = frame.winit_window() {
             os_window::place_top(w.as_ref(), size, kind.top_margin());
         }
@@ -346,9 +346,11 @@ impl MiniLyricsApp {
         self.applied_layout = Some(layout);
     }
 
-    fn debug_height(&self) -> f32 {
+    /// Tinggi tambahan panel notch saat mode debug (overlay ada di dalam
+    /// bentuk hitam, di bawah baris lirik).
+    fn notch_debug_height(&self) -> f32 {
         if self.settings.debug {
-            theme::DEBUG_HEIGHT
+            theme::NOTCH_DEBUG_HEIGHT
         } else {
             0.0
         }
@@ -404,24 +406,26 @@ impl eframe::App for MiniLyricsApp {
             .map(|s| s.clone())
             .unwrap_or_default();
         let full = ui.ctx().content_rect();
-        // Kolom tempat overlay debug: tepat di bawah panel/bentuk notch.
-        let debug_column = match self.settings.display_mode {
+        match self.settings.display_mode {
             DisplayMode::Panel => {
                 let actions = self.ui_panel(ui, &np, now);
                 if !actions.is_empty() {
                     self.apply_actions(ui.ctx(), actions, "tombol panel");
                 }
-                let panel = panel_rect(full.min);
-                Rect::from_x_y_ranges(panel.x_range(), panel.max.y..=full.max.y)
+                if self.settings.debug {
+                    // Overlay debug: kotak terpisah tepat di bawah panel.
+                    let panel = panel_rect(full.min);
+                    let column = Rect::from_x_y_ranges(panel.x_range(), panel.max.y..=full.max.y);
+                    self.draw_debug(ui, &np, now, column);
+                }
             }
             DisplayMode::Notch => {
-                self.ui_notch(ui, &np, now);
-                let top = full.min.y + self.notch_kind.window_size(0.0).y;
-                Rect::from_x_y_ranges(full.shrink(2.0).x_range(), top..=full.max.y)
+                // Overlay debug mode notch digambar di dalam bentuknya.
+                let actions = self.ui_notch(ui, &np, now);
+                if !actions.is_empty() {
+                    self.apply_actions(ui.ctx(), actions, "tombol notch");
+                }
             }
-        };
-        if self.settings.debug {
-            self.draw_debug(ui, &np, now, debug_column);
         }
     }
 
@@ -711,104 +715,518 @@ impl MiniLyricsApp {
         }
     }
 
-    /// Mode "Notch": bentuk notch (atau pill) hitam di tengah atas, satu
-    /// baris lirik di bawah area kamera, collapsed/expanded dengan animasi.
-    fn ui_notch(&self, ui: &egui::Ui, np: &now_playing::NowPlaying, now: Instant) {
+    /// Mode "Notch" (gaya D): bentuk hitam pekat yang tumbuh dari notch
+    /// fisik (atau pill di tengah atas). Expanded: telinga judul/artis di
+    /// samping kamera + satu baris lirik. Kursor mendekat: kempis ke
+    /// collapsed (click-through aktif) atau isinya meredup (click-through
+    /// mati, sekaligus memunculkan kontrol di telinga saat kursor di panel).
+    fn ui_notch(
+        &self,
+        ui: &egui::Ui,
+        np: &now_playing::NowPlaying,
+        now: Instant,
+    ) -> Vec<TrayAction> {
+        let ctx = ui.ctx();
         let player = np.player.as_ref();
-        let kind = self.notch_kind;
-        let full = ui.ctx().content_rect();
-        let lyrics_area =
-            Rect::from_min_size(full.min, vec2(full.width(), kind.window_size(0.0).y));
-        let painter = ui.painter().with_clip_rect(lyrics_area);
-
-        // Expanded selama ada lagu yang diputar; pause/tanpa lagu → collapsed.
-        let expanded = player.is_some_and(|p| p.is_playing);
-        let t = ui.ctx().animate_bool_with_time(
-            ui.scope_id().with("notch-expand"),
-            expanded,
-            theme::NOTCH_EXPAND,
-        );
-        let body = kind.body_rect(full.min, full.width(), t);
-        let hover = self.hover_alpha(ui, kind.hit_rect(body));
-        let color = Color32::from_black_alpha((255.0 * hover) as u8);
-        match kind {
-            Kind::Notch(_) => {
-                notch::paint_notch(&painter, body, notch::notch_bottom_radius(t), color)
-            }
-            Kind::Pill => notch::paint_pill(&painter, body, color),
-        }
-
-        let alpha = notch::text_alpha(t) * hover;
-        if alpha <= 0.01 {
-            return;
-        }
-        let Some(p) = player else {
-            return;
-        };
-        // Area kamera dibiarkan kosong: teks hanya di bawahnya.
-        let text_rect = kind.text_rect(body);
-        let painter = painter.with_clip_rect(text_rect.intersect(lyrics_area));
-        let center = text_rect.center();
-        let max_w = text_rect.width();
         let view = self.lyrics.view();
-        match &view.status {
-            LyricsStatus::Ready(lines) => {
+        let kind = self.notch_kind;
+        let full = ctx.content_rect();
+        let time = ui.input(|i| i.time);
+        let debug_h = self.notch_debug_height();
+        let painter = ui.painter().with_clip_rect(full);
+
+        // Kursor dibaca global (event mouse tidak sampai saat passthrough).
+        let expanded_body = kind.body_rect(full.min, full.width(), 1.0, debug_h);
+        let zone = kind.hit_rect(expanded_body).expand(theme::NOTCH_NEAR_ZONE);
+        let near = self.cursor.is_some_and(|c| zone.contains(c));
+        let click_through = self.settings.click_through();
+
+        let id = ui.scope_id().with("notch-state");
+        let frame = ctx.data_mut(|d| {
+            let st = d.get_temp_mut_or_insert_with(id, || NotchUi {
+                transition: notch::Transition::new(true, time),
+                last_near: None,
+            });
+            if near {
+                st.last_near = Some(time);
+            }
+            // Click-through aktif: kursor mendekat → kempis; mekar lagi
+            // 600 ms setelah kursor pergi. Click-through mati: tetap terbuka.
+            let recently_near = st
+                .last_near
+                .is_some_and(|t| time - t < theme::NOTCH_REOPEN_DELAY as f64);
+            let open = !(click_through && recently_near);
+            st.transition.set(open, time);
+            (st.transition.frame(time), recently_near && !near)
+        });
+        let (frame, waiting_reopen) = frame;
+        if !frame.settled || waiting_reopen {
+            // Animasi berjalan, atau menunggu jeda sebelum mekar lagi.
+            ctx.request_repaint_after(Duration::from_millis(16));
+        }
+
+        let body = kind.body_rect(full.min, full.width(), frame.shape, debug_h);
+        notch::paint_shape(
+            &painter,
+            body,
+            kind.bottom_radius(frame.shape),
+            theme::NOTCH_BG.color(),
+        );
+
+        let playing = player.is_some_and(|p| p.is_playing);
+        let paused = player.is_some_and(|p| !p.is_playing);
+
+        // Isi collapsed (♪/❚❚ + equalizer) memudar saat isi expanded muncul.
+        let collapsed_alpha = 1.0 - frame.content;
+        if collapsed_alpha > 0.01 {
+            self.paint_collapsed_marks(
+                &painter,
+                kind,
+                body,
+                playing,
+                paused,
+                time,
+                collapsed_alpha,
+            );
+        }
+        let mut actions = Vec::new();
+        if frame.content <= 0.01 {
+            return actions;
+        }
+
+        // Click-through mati: kursor di atas panel → kontrol di telinga;
+        // kursor di sekitar panel → isi meredup.
+        let inside = !click_through
+            && ctx
+                .pointer_hover_pos()
+                .is_some_and(|p| kind.hit_rect(body).contains(p));
+        let dim_t = ctx.animate_bool_with_time(
+            ui.scope_id().with("notch-near"),
+            !click_through && near && !inside,
+            theme::HOVER_FADE,
+        );
+        let controls_t = ctx.animate_bool_with_time(
+            ui.scope_id().with("notch-controls"),
+            inside && matches!(kind, Kind::Notch(_)),
+            theme::CONTROLS_FADE,
+        );
+        let base = frame.content * lerp(1.0, theme::NOTCH_NEAR_OPACITY, dim_t);
+        // Lirik & teks telinga meredup ke 45% saat dijeda.
+        let pause_t = ctx.animate_bool_with_time(
+            ui.scope_id().with("notch-paused"),
+            paused,
+            theme::PAUSE_FADE,
+        );
+        let cop = base * lerp(1.0, theme::NOTCH_PAUSED_OPACITY, pause_t);
+
+        // Telinga (hanya notch; pill tidak punya pita atas).
+        if let (Kind::Notch(_), Some(p), LyricsStatus::Ready(_)) = (kind, player, &view.status) {
+            let ears_alpha = 1.0 - controls_t;
+            if ears_alpha > 0.01 {
+                self.paint_ears(
+                    &painter,
+                    kind,
+                    body,
+                    p,
+                    now,
+                    time,
+                    base * ears_alpha,
+                    cop * ears_alpha,
+                );
+            }
+        }
+        if controls_t > 0.01 {
+            self.ear_controls(
+                ui,
+                kind,
+                body,
+                view,
+                base * controls_t,
+                controls_t > 0.5,
+                &mut actions,
+            );
+        }
+
+        // Baris lirik / status di bawah pita kamera.
+        let row = kind.row_rect(body);
+        let row_painter = painter.with_clip_rect(row.intersect(body));
+        let max_w = row.width() - 2.0 * theme::NOTCH_ROW_PAD_X;
+        match (player, &view.status) {
+            (Some(p), LyricsStatus::Ready(lines)) => {
                 let pos = p.position_at(now) + self.settings.offset_secs;
                 let f = karaoke::frame_at(lines, pos);
+                let style = theme::NOTCH_ACTIVE_TEXT;
                 match f.current {
                     Some(text) if !text.trim().is_empty() => draw_karaoke(
-                        &painter,
-                        center,
+                        &row_painter,
+                        row.center(),
                         max_w,
                         text,
-                        &theme::NOTCH_TEXT,
-                        theme::NOTCH_BASE.faded(alpha),
-                        theme::NOTCH_FILL.faded(alpha),
+                        &style,
+                        theme::NOTCH_ACTIVE_BASE.faded(cop),
+                        theme::NOTCH_ACTIVE_FILL.faded(cop),
                         f.progress,
                     ),
-                    // Sebelum baris pertama / jeda: tampilkan baris berikutnya redup.
-                    _ => {
-                        let label = f.next.filter(|n| !n.trim().is_empty()).unwrap_or("♪");
-                        let style = &theme::NOTCH_HINT_TEXT;
+                    // Sebelum baris pertama: judul — artis. Jeda instrumental: ♪.
+                    current => {
+                        let label = match current {
+                            None => song_label(p),
+                            Some(_) => "♪".into(),
+                        };
                         draw_text(
-                            &painter,
-                            center,
+                            &row_painter,
+                            row.center(),
                             max_w,
-                            label,
-                            style,
-                            theme::NOTCH_HINT_COLOR,
-                            alpha,
+                            &label,
+                            &style,
+                            theme::NOTCH_ACTIVE_BASE,
+                            cop,
                         );
                     }
                 }
             }
-            status => {
-                let msg = match status {
-                    LyricsStatus::NotFound => "Lirik sinkron nggak ketemu",
-                    LyricsStatus::NetworkError(_) => "Gagal konek ke server lirik",
-                    _ => "Nyari lirik…",
+            (player, status) => {
+                let song = player.map(song_label).unwrap_or_default();
+                let (icon, main, sub) = match (player, status) {
+                    (None, _) => (
+                        StatusIcon::None,
+                        "Putar lagu dulu ♪",
+                        "Spotify lagi diam".to_string(),
+                    ),
+                    (_, LyricsStatus::NotFound) => {
+                        (StatusIcon::NotFound, "Lirik sinkron nggak ketemu", song)
+                    }
+                    (_, LyricsStatus::NetworkError(_)) => (
+                        StatusIcon::Error,
+                        "Gagal konek ke server lirik",
+                        retry_label(view, now),
+                    ),
+                    _ => (StatusIcon::Loading, "Nyari lirik…", song),
                 };
-                let label = format!("{msg} · {}", p.title);
-                let style = &theme::NOTCH_STATUS_TEXT;
-                draw_text(
-                    &painter,
-                    center,
-                    max_w,
-                    &label,
-                    style,
-                    theme::NOTCH_STATUS_COLOR,
-                    alpha,
-                );
+                draw_notch_status(ui, &row_painter, row, icon, main, &sub, base);
             }
         }
+
+        if self.settings.debug && debug_h > 0.0 {
+            let area = Rect::from_min_max(pos2(body.min.x, row.max.y), body.max);
+            self.draw_notch_debug(&painter.with_clip_rect(body), area, np, now, base);
+        }
+        actions
+    }
+
+    /// ♪ (atau ❚❚ saat dijeda) di telinga kiri dan equalizer di telinga kanan
+    /// bentuk collapsed. Pill: keduanya di tengah.
+    #[allow(clippy::too_many_arguments)]
+    fn paint_collapsed_marks(
+        &self,
+        painter: &Painter,
+        kind: Kind,
+        body: Rect,
+        playing: bool,
+        paused: bool,
+        time: f64,
+        alpha: f32,
+    ) {
+        let accent = theme::NOTCH_ACCENT.faded(alpha);
+        let note = text_galley(
+            painter,
+            "♪",
+            &TextStyle::plain(theme::NOTE_SIZE),
+            theme::NOTE_SIZE,
+            theme::NOTE_COLOR.faded(alpha),
+        );
+        let mark_w = if paused {
+            notch::pause_width()
+        } else {
+            note.size().x
+        };
+        let eq_w = notch::equalizer_width();
+        let heights = notch::equalizer_heights(playing, time);
+        let (mark_right, eq_left, cy) = match kind {
+            Kind::Notch(_) => {
+                let (l, r) = kind.ears(body);
+                (
+                    l.max.x - theme::EAR_PAD_COLLAPSED,
+                    r.min.x + theme::EAR_PAD_COLLAPSED,
+                    l.center().y,
+                )
+            }
+            Kind::Pill => {
+                let total = mark_w + theme::PILL_COLLAPSED_GAP + eq_w;
+                let x0 = body.center().x - total / 2.0;
+                (
+                    x0 + mark_w,
+                    x0 + mark_w + theme::PILL_COLLAPSED_GAP,
+                    body.center().y,
+                )
+            }
+        };
+        if paused {
+            notch::paint_pause(painter, pos2(mark_right - mark_w, cy), accent);
+        } else {
+            let at = Align2::RIGHT_CENTER.anchor_size(pos2(mark_right, cy), note.size());
+            painter.galley(at.min, note, theme::NOTE_COLOR.faded(alpha));
+        }
+        notch::paint_equalizer(
+            painter,
+            pos2(eq_left, cy + theme::EQ_MAX_HEIGHT / 2.0),
+            heights,
+            accent,
+        );
+    }
+
+    /// Telinga expanded: kiri = [❚❚] (Dijeda · ) judul, kanan = artis ·
+    /// posisi [equalizer]. `alpha` untuk ikon, `text_alpha` untuk teks (ikut
+    /// meredup saat dijeda).
+    #[allow(clippy::too_many_arguments)]
+    fn paint_ears(
+        &self,
+        painter: &Painter,
+        kind: Kind,
+        body: Rect,
+        p: &PlayerState,
+        now: Instant,
+        time: f64,
+        alpha: f32,
+        text_alpha: f32,
+    ) {
+        let (left, right) = kind.ears(body);
+        let style = theme::EAR_TEXT;
+        let color = theme::EAR_COLOR.faded(text_alpha);
+        let accent = theme::NOTCH_ACCENT.faded(alpha);
+        let galley = |text: &str| text_galley(painter, text, &style, style.size, color);
+
+        // Kiri.
+        let cy = left.center().y;
+        let mut x = left.min.x + theme::EAR_PAD;
+        let paused = !p.is_playing;
+        if paused {
+            notch::paint_pause(painter, pos2(x, cy), accent);
+            x += notch::pause_width() + theme::EAR_GAP_LEFT;
+        }
+        let title = if paused {
+            format!("Dijeda · {}", p.title)
+        } else {
+            p.title.clone()
+        };
+        let avail = left.max.x - theme::EAR_PAD - x;
+        if avail > 8.0 {
+            let text = ellipsize(&title, avail, galley);
+            let g = galley(&text);
+            let at = Align2::LEFT_CENTER.anchor_size(pos2(x, cy), g.size());
+            paint_weighted(painter, at.min, g, style.weight, color);
+        }
+
+        // Kanan.
+        let cy = right.center().y;
+        let mut x_end = right.max.x - theme::EAR_PAD;
+        if p.is_playing {
+            let eq_w = notch::equalizer_width();
+            notch::paint_equalizer(
+                painter,
+                pos2(x_end - eq_w, cy + theme::EQ_MAX_HEIGHT / 2.0),
+                notch::equalizer_heights(true, time),
+                accent,
+            );
+            x_end -= eq_w + theme::EAR_GAP_RIGHT;
+        }
+        let pos = minutes(p.position_at(now));
+        let label = if p.artist.is_empty() {
+            pos
+        } else {
+            format!("{} · {pos}", p.artist)
+        };
+        let avail = x_end - (right.min.x + theme::EAR_PAD);
+        if avail > 8.0 {
+            let text = ellipsize(&label, avail, galley);
+            let g = galley(&text);
+            let at = Align2::RIGHT_CENTER.anchor_size(pos2(x_end, cy), g.size());
+            paint_weighted(painter, at.min, g, style.weight, color);
+        }
+    }
+
+    /// Kontrol di telinga saat kursor di atas panel (click-through mati):
+    /// kiri = − offset +, kanan = cari lirik lain.
+    #[allow(clippy::too_many_arguments)]
+    fn ear_controls(
+        &self,
+        ui: &egui::Ui,
+        kind: Kind,
+        body: Rect,
+        view: &LyricsView,
+        alpha: f32,
+        interactive: bool,
+        actions: &mut Vec<TrayAction>,
+    ) {
+        let painter = ui.painter();
+        let (left, right) = kind.ears(body);
+        let size = theme::EAR_BUTTON_SIZE;
+        let gap = theme::EAR_BUTTON_GAP;
+        let style = theme::EAR_TEXT;
+
+        // Mengembalikan aksi kalau tombol diklik.
+        let button =
+            |key: &str, center: Pos2, icon: EarIcon, action: Option<TrayAction>, bg: Tint| {
+                let mut clicked = None;
+                let rect = Rect::from_center_size(center, vec2(size, size));
+                let mut fill = bg;
+                if let (Some(action), true) = (action, interactive) {
+                    let resp = ui.interact(rect, ui.scope_id().with(("ear", key)), Sense::click());
+                    if resp.hovered() {
+                        fill = theme::EAR_BUTTON_HOVER_BG;
+                    }
+                    if resp.clicked() {
+                        clicked = Some(action);
+                    }
+                }
+                let a = if action.is_some() {
+                    alpha
+                } else {
+                    alpha * theme::CONTROL_DISABLED_ALPHA
+                };
+                painter.circle_filled(rect.center(), size / 2.0, fill.faded(a));
+                paint_ear_icon(
+                    painter,
+                    rect.center(),
+                    icon,
+                    theme::EAR_BUTTON_ICON.faded(a),
+                );
+                clicked
+            };
+
+        if matches!(view.status, LyricsStatus::Ready(_)) {
+            let offset = self.settings.offset_secs;
+            let label = tray::offset_text(offset);
+            let accent = theme::NOTCH_ACCENT.faded(alpha);
+            let g = text_galley(painter, &label, &style, style.size, accent);
+            let label_w = g.size().x.max(theme::EAR_OFFSET_MIN_WIDTH);
+            let total = 2.0 * size + 2.0 * gap + label_w;
+            let cy = left.center().y;
+            let x0 = left.center().x - total / 2.0;
+            actions.extend(button(
+                "later",
+                pos2(x0 + size / 2.0, cy),
+                EarIcon::Minus,
+                Some(TrayAction::OffsetLater),
+                theme::EAR_BUTTON_BG,
+            ));
+            let label_rect =
+                Rect::from_min_size(pos2(x0 + size + gap, cy - size / 2.0), vec2(label_w, size));
+            if offset != 0.0 && interactive {
+                let resp = ui.interact(
+                    label_rect,
+                    ui.scope_id().with(("ear", "reset")),
+                    Sense::click(),
+                );
+                if resp.clicked() {
+                    actions.push(TrayAction::ResetOffset);
+                }
+            }
+            let at = Align2::CENTER_CENTER.anchor_size(label_rect.center(), g.size());
+            paint_weighted(painter, at.min, g, style.weight, accent);
+            actions.extend(button(
+                "earlier",
+                pos2(x0 + total - size / 2.0, cy),
+                EarIcon::Plus,
+                Some(TrayAction::OffsetEarlier),
+                theme::EAR_BUTTON_BG,
+            ));
+        }
+
+        if matches!(view.status, LyricsStatus::Ready(_) | LyricsStatus::NotFound) {
+            let action = match &view.alternatives {
+                Alternatives::Searching => None,
+                alt @ Alternatives::Ready { .. } if !alt.has_others() => None,
+                _ => Some(TrayAction::NextLyrics),
+            };
+            actions.extend(button(
+                "search",
+                right.center(),
+                EarIcon::Search,
+                action,
+                theme::EAR_BUTTON_HOVER_BG,
+            ));
+            // Posisi pilihan saat ini (mis. 2/5) di kiri tombol.
+            if let Alternatives::Ready { index, labels } = &view.alternatives {
+                if labels.len() > 1 {
+                    let pos = index.map_or("–".into(), |i| (i + 1).to_string());
+                    let text = format!("{pos}/{}", labels.len());
+                    let color = theme::EAR_COLOR.faded(alpha);
+                    let g = text_galley(painter, &text, &style, style.size, color);
+                    let at = Align2::RIGHT_CENTER
+                        .anchor_size(right.center() - vec2(size / 2.0 + 6.0, 0.0), g.size());
+                    paint_weighted(painter, at.min, g, style.weight, color);
+                }
+            }
+        }
+    }
+
+    /// Overlay debug di dalam panel notch: garis pemisah tipis, kunci kuning.
+    fn draw_notch_debug(
+        &self,
+        painter: &Painter,
+        area: Rect,
+        np: &now_playing::NowPlaying,
+        now: Instant,
+        alpha: f32,
+    ) {
+        let m = theme::NOTCH_DEBUG_MARGIN;
+        let inner = Rect::from_min_max(
+            pos2(area.min.x + m.x, area.min.y),
+            pos2(area.max.x - m.x, area.max.y - m.y),
+        );
+        painter.hline(
+            inner.x_range(),
+            inner.min.y,
+            Stroke::new(1.0, theme::NOTCH_DEBUG_DIVIDER.faded(alpha)),
+        );
+        let rows = self.debug_rows(np, now);
+        let top = inner.min.y + theme::NOTCH_DEBUG_PAD_TOP;
+        paint_debug_rows(
+            painter,
+            pos2(inner.min.x, top),
+            inner.max.x,
+            &rows,
+            theme::NOTCH_DEBUG_KEY_COLOR.faded(alpha),
+            theme::DEBUG_VALUE_COLOR.faded(alpha),
+        );
     }
 
     /// Overlay debug: kotak monospace kecil di bawah panel, dua kolom
     /// (kunci, nilai). `column` = area di bawah panel/bentuk notch.
     fn draw_debug(&self, ui: &egui::Ui, np: &now_playing::NowPlaying, now: Instant, column: Rect) {
+        let rows = self.debug_rows(np, now);
+        let pad = theme::DEBUG_PAD;
+        let height = 2.0 * pad.y + rows.len() as f32 * theme::DEBUG_ROW_HEIGHT;
+        let rect = Rect::from_min_size(
+            column.min + vec2(0.0, theme::DEBUG_GAP),
+            vec2(column.width(), height),
+        );
+        let painter = ui.painter().with_clip_rect(rect);
+        painter.rect_filled(
+            rect,
+            CornerRadius::same(theme::DEBUG_RADIUS),
+            theme::DEBUG_BG.color(),
+        );
+        paint_debug_rows(
+            &painter,
+            rect.min + pad,
+            rect.max.x - pad.x,
+            &rows,
+            theme::DEBUG_KEY_COLOR.color(),
+            theme::DEBUG_VALUE_COLOR.color(),
+        );
+    }
+
+    /// Baris overlay debug (kunci, nilai), maksimal [`theme::DEBUG_MAX_ROWS`].
+    fn debug_rows(
+        &self,
+        np: &now_playing::NowPlaying,
+        now: Instant,
+    ) -> Vec<(&'static str, String)> {
         let view = self.lyrics.view();
         let poll = np.poll_duration.map_or(0, |d| d.as_millis());
-        let mut rows: Vec<(&str, String)> = Vec::new();
+        let mut rows: Vec<(&'static str, String)> = Vec::new();
         match &np.player {
             Some(p) => {
                 let interp = p.position_at(now);
@@ -837,42 +1255,162 @@ impl MiniLyricsApp {
             rows.push(("player", e.clone()));
         }
         rows.truncate(theme::DEBUG_MAX_ROWS);
+        rows
+    }
+}
 
-        let pad = theme::DEBUG_PAD;
-        let height = 2.0 * pad.y + rows.len() as f32 * theme::DEBUG_ROW_HEIGHT;
-        let rect = Rect::from_min_size(
-            column.min + vec2(0.0, theme::DEBUG_GAP),
-            vec2(column.width(), height),
-        );
-        let painter = ui.painter().with_clip_rect(rect);
-        painter.rect_filled(
-            rect,
-            CornerRadius::same(theme::DEBUG_RADIUS),
-            theme::DEBUG_BG.color(),
-        );
+/// Keadaan mode notch yang disimpan di memori egui antar frame.
+#[derive(Debug, Clone, Copy)]
+struct NotchUi {
+    transition: notch::Transition,
+    /// Kapan (detik egui) kursor terakhir berada di zona dekat panel.
+    last_near: Option<f64>,
+}
 
-        let font = FontId::monospace(theme::DEBUG_FONT_SIZE);
-        let key_color = theme::DEBUG_KEY_COLOR.color();
-        let value_color = theme::DEBUG_VALUE_COLOR.color();
-        let value_x = rect.min.x + pad.x + theme::DEBUG_KEY_WIDTH + theme::DEBUG_COL_GAP;
-        let value_w = rect.max.x - pad.x - value_x;
-        for (i, (key, value)) in rows.into_iter().enumerate() {
-            let cy = rect.min.y + pad.y + (i as f32 + 0.5) * theme::DEBUG_ROW_HEIGHT;
-            painter.text(
-                pos2(rect.min.x + pad.x, cy),
-                Align2::LEFT_CENTER,
-                key,
-                font.clone(),
-                key_color,
-            );
-            let value = ellipsize(&value, value_w, |s| {
-                painter.layout_no_wrap(s.to_string(), font.clone(), value_color)
-            });
-            let g = painter.layout_no_wrap(value, font.clone(), value_color);
-            let at = Align2::LEFT_CENTER.anchor_size(pos2(value_x, cy), g.size());
-            painter.galley(at.min, g, value_color);
+/// Ikon tombol bulat di telinga notch.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum EarIcon {
+    Minus,
+    Plus,
+    Search,
+}
+
+fn paint_ear_icon(painter: &Painter, c: Pos2, icon: EarIcon, color: Color32) {
+    let stroke = Stroke::new(1.5, color);
+    match icon {
+        EarIcon::Minus => {
+            painter.line_segment([c - vec2(5.0, 0.0), c + vec2(5.0, 0.0)], stroke);
+        }
+        EarIcon::Plus => {
+            painter.line_segment([c - vec2(5.0, 0.0), c + vec2(5.0, 0.0)], stroke);
+            painter.line_segment([c - vec2(0.0, 5.0), c + vec2(0.0, 5.0)], stroke);
+        }
+        EarIcon::Search => {
+            // Kaca pembesar: lingkaran 8 px + gagang 45°.
+            let lens = c - vec2(1.5, 1.5);
+            painter.circle_stroke(lens, 3.25, stroke);
+            let d = std::f32::consts::FRAC_1_SQRT_2;
+            let from = lens + vec2(d, d) * 3.25;
+            painter.line_segment([from, from + vec2(d, d) * 3.5], stroke);
         }
     }
+}
+
+/// Status satu baris di mode notch: [ikon] judul 15/600 + sub 12/400.
+fn draw_notch_status(
+    ui: &egui::Ui,
+    painter: &Painter,
+    row: Rect,
+    icon: StatusIcon,
+    main: &str,
+    sub: &str,
+    alpha: f32,
+) {
+    let gap = theme::NOTCH_STATUS_GAP;
+    let max_w = row.width() - 2.0 * theme::NOTCH_ROW_PAD_X;
+    let icon_w = match icon {
+        StatusIcon::None => 0.0,
+        StatusIcon::Loading => 3.0 * theme::LOADING_DOT_SIZE + 2.0 * theme::LOADING_DOT_GAP,
+        StatusIcon::NotFound => theme::NOT_FOUND_RING_SIZE,
+        StatusIcon::Error => theme::ERROR_DOT_SIZE,
+    };
+    let icon_space = if icon_w > 0.0 { icon_w + gap } else { 0.0 };
+    let (main_style, sub_style) = (theme::NOTCH_STATUS_MAIN_TEXT, theme::NOTCH_STATUS_SUB_TEXT);
+    let main_color = theme::NOTCH_STATUS_MAIN_COLOR.faded(alpha);
+    let sub_color = theme::NOTCH_STATUS_SUB_COLOR.faded(alpha);
+    let (main_text, size) = fit_line(
+        painter,
+        main,
+        &main_style,
+        max_w - icon_space,
+        theme::MIN_FONT_SCALE,
+    );
+    let main_g = text_galley(painter, &main_text, &main_style, size, main_color);
+    // Sub mengisi sisa lebar, dipotong ellipsis kalau tidak muat.
+    let sub_avail = max_w - icon_space - main_g.size().x - gap;
+    let sub_g = (sub_avail > 24.0 && !sub.is_empty()).then(|| {
+        let text = ellipsize(sub, sub_avail, |s| {
+            text_galley(painter, s, &sub_style, sub_style.size, sub_color)
+        });
+        text_galley(painter, &text, &sub_style, sub_style.size, sub_color)
+    });
+    let total = icon_space + main_g.size().x + sub_g.as_ref().map_or(0.0, |g| gap + g.size().x);
+    let cy = row.center().y;
+    let mut x = row.center().x - total / 2.0;
+
+    match icon {
+        StatusIcon::None => {}
+        StatusIcon::Loading => {
+            let step = (ui.input(|i| i.time) / theme::LOADING_STEP as f64) as usize % 3;
+            let r = theme::LOADING_DOT_SIZE / 2.0;
+            for i in 0..3 {
+                let a = theme::NOTCH_LOADING_ALPHAS[(i + 3 - step) % 3];
+                let dx = r + i as f32 * (theme::LOADING_DOT_SIZE + theme::LOADING_DOT_GAP);
+                painter.circle_filled(pos2(x + dx, cy), r, theme::NOTCH_ACCENT.faded(a * alpha));
+            }
+            ui.ctx()
+                .request_repaint_after(Duration::from_secs_f32(theme::LOADING_STEP));
+        }
+        StatusIcon::NotFound => {
+            let w = theme::NOT_FOUND_RING_WIDTH;
+            painter.circle_stroke(
+                pos2(x + icon_w / 2.0, cy),
+                (theme::NOT_FOUND_RING_SIZE - w) / 2.0,
+                Stroke::new(w, theme::NOTCH_NOT_FOUND_COLOR.faded(alpha)),
+            );
+        }
+        StatusIcon::Error => {
+            painter.circle_filled(
+                pos2(x + icon_w / 2.0, cy),
+                theme::ERROR_DOT_SIZE / 2.0,
+                theme::ERROR_DOT_COLOR.faded(alpha),
+            );
+        }
+    }
+    x += icon_space;
+    let at = Align2::LEFT_CENTER.anchor_size(pos2(x, cy), main_g.size());
+    x += main_g.size().x + gap;
+    paint_weighted(painter, at.min, main_g, main_style.weight, main_color);
+    if let Some(g) = sub_g {
+        let at = Align2::LEFT_CENTER.anchor_size(pos2(x, cy), g.size());
+        paint_weighted(painter, at.min, g, sub_style.weight, sub_color);
+    }
+}
+
+/// Gambar baris debug dua kolom mulai `top_left`, nilai dipotong di `right`.
+fn paint_debug_rows(
+    painter: &Painter,
+    top_left: Pos2,
+    right: f32,
+    rows: &[(&'static str, String)],
+    key_color: Color32,
+    value_color: Color32,
+) {
+    let font = FontId::monospace(theme::DEBUG_FONT_SIZE);
+    let value_x = top_left.x + theme::DEBUG_KEY_WIDTH + theme::DEBUG_COL_GAP;
+    let value_w = right - value_x;
+    for (i, (key, value)) in rows.iter().enumerate() {
+        let cy = top_left.y + (i as f32 + 0.5) * theme::DEBUG_ROW_HEIGHT;
+        painter.text(
+            pos2(top_left.x, cy),
+            Align2::LEFT_CENTER,
+            key,
+            font.clone(),
+            key_color,
+        );
+        let value = ellipsize(value, value_w, |s| {
+            painter.layout_no_wrap(s.to_string(), font.clone(), value_color)
+        });
+        let g = painter.layout_no_wrap(value, font.clone(), value_color);
+        let at = Align2::LEFT_CENTER.anchor_size(pos2(value_x, cy), g.size());
+        painter.galley(at.min, g, value_color);
+    }
+}
+
+/// `m:ss`
+fn minutes(secs: f64) -> String {
+    let s = secs.max(0.0) as u64;
+    format!("{}:{:02}", s / 60, s % 60)
 }
 
 fn lerp(a: f32, b: f32, t: f32) -> f32 {

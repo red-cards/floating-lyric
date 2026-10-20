@@ -72,26 +72,30 @@ Tips umum:
 | macOS: Cmd+Tab | MiniLyrics tidak muncul di daftar | ☐ | – |
 | Latar transparan | Hanya kotak rounded semi-transparan yang terlihat, sisanya tembus pandang | ☐ | ☐ |
 
-## Mode Notch
+## Mode Notch (gaya D)
 
 | Skenario | Yang diharapkan | macOS | Windows |
 |---|---|---|---|
 | Tray → Tampilan: Notch | Centang pindah (seperti radio); window pindah ke tengah atas | ☐ | ☐ |
-| Mac ber-notch, tidak ada lagu / pause | Bentuk hitam menyatu dengan notch kamera (tidak terlihat beda) | ☐ | – |
-| Mac ber-notch, lagu diputar | Bentuk memanjang ke bawah dengan animasi; 1 baris lirik di bawah area kamera, area kamera kosong | ☐ | – |
-| Sudut bentuk notch | Sudut atas melengkung ke luar (inverse fillet) menyatu dengan tepi atas, sudut bawah membulat | ☐ | – |
+| Mac ber-notch, lagu diputar | Panel hitam 560×80 tumbuh dari notch: telinga kiri = judul, kanan = artis · posisi + equalizer kuning bergerak; 1 baris lirik di bawah kamera, terisi kuning | ☐ | – |
+| Area kamera | Tidak ada teks/ikon di zona tengah atas selebar notch | ☐ | – |
+| Sudut bentuk | Sudut atas melengkung ke dalam menyatu dengan tepi layar, sudut bawah membulat | ☐ | – |
 | Posisi di atas menu bar | Bentuk menempel ke tepi atas layar, tidak terdorong ke bawah menu bar (cek log kalau ada `di-constrain`) | ☐ | – |
-| Layar tanpa notch / Windows | Pill hitam kecil di tengah atas; memanjang saat lagu diputar | ☐ | ☐ |
-| Pause → play → pause | Collapsed/expanded dengan animasi tinggi + fade teks | ☐ | ☐ |
+| Pause | ❚❚ kuning + "Dijeda · judul" di telinga kiri, lirik & telinga meredup, equalizer hilang | ☐ | ☐ |
+| Kursor mendekat (click-through aktif) | Panel kempis ke collapsed (♪ kiri, equalizer kanan), mekar lagi ±0,6 dtk setelah kursor pergi | ☐ | ☐ |
+| Kursor mendekat (click-through mati) | Panel tidak kempis, isi meredup ke ±25% | ☐ | ☐ |
+| Kursor di atas panel (click-through mati) | Telinga berganti jadi `− offset +` (kiri) dan tombol cari lirik lain (kanan); tombol berfungsi | ☐ | – |
+| Animasi | Lebar & tinggi tumbuh bersamaan, isi muncul sesudahnya; menutup: isi hilang dulu baru menyusut | ☐ | ☐ |
+| Loading / tidak ketemu / error / belum diputar | Satu baris status di tempat lirik (titik kuning / cincin / titik koral) | ☐ | ☐ |
+| Layar tanpa notch / Windows | Pill hitam 520×44 menggantung dari tepi atas tengah; collapsed 112×26 (♪ + equalizer) | ☐ | ☐ |
 | Click-through default | Langsung aktif di mode Notch; klik menu bar/tab di bawahnya tembus | ☐ | ☐ |
-| Kursor masuk area panel | Panel & teks meredup; keluar → normal lagi | ☐ | ☐ |
 | Mac + monitor eksternal (tanpa notch) | Tetap tampil di layar MacBook (yang ber-notch) | ☐ | – |
 | Clamshell / hanya monitor eksternal | Pill di layar utama | ☐ | – |
 | Windows multi monitor | Pill di monitor utama | – | ☐ |
-| Mode debug di mode Notch | Overlay muncul di bawah bentuk | ☐ | ☐ |
+| Mode debug di mode Notch | Panel memanjang ke bawah; baris debug (kunci kuning) di bawah garis tipis | ☐ | ☐ |
 | Kembali ke Tampilan: Panel bawah | Panel kembali ke posisi tersimpan; click-through panel tidak ikut berubah | ☐ | ☐ |
 | Restart app | Mode tampilan tetap seperti sebelumnya | ☐ | ☐ |
-| `MINI_LYRICS_FAKE_NOTCH=185x32` (+ `MINI_LYRICS_DEMO=1`) | Bentuk notch tampil di layar tanpa notch | ☐ | ☐ |
+| `MINI_LYRICS_FAKE_NOTCH=200x32` (+ `MINI_LYRICS_DEMO=1`) | Bentuk notch tampil di layar tanpa notch | ☐ | ☐ |
 
 ## Tray
 
