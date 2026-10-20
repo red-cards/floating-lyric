@@ -98,31 +98,26 @@ atau firewall kantor).
 
 ## Build lokal
 
-### Syarat
+Panduan lengkap (instalasi toolchain per OS, variabel env, bundle `.app`,
+troubleshooting): **[BUILDING.md](BUILDING.md)**.
 
-- [rustup](https://rustup.rs) (toolchain stable).
-- **macOS:** Xcode Command Line Tools (`xcode-select --install`).
-- **Windows:** Visual Studio Build Tools dengan workload **Desktop development
-  with C++** (MSVC + Windows SDK).
+Ringkasnya:
 
-### Perintah
+- **Syarat:** [rustup](https://rustup.rs) dengan Rust stable ≥ 1.95.
+  **macOS:** Xcode Command Line Tools (`xcode-select --install`).
+  **Windows:** Visual Studio Build Tools dengan workload **Desktop development
+  with C++** (butuh hak admin — di laptop kantor tanpa admin pakai artifact CI).
 
 ```sh
-cargo run -p mini-lyrics                 # jalankan (debug)
-MINI_LYRICS_DEMO=1 cargo run -p mini-lyrics   # mode demo: lagu & lirik palsu, tanpa Spotify/jaringan
-MINI_LYRICS_FAKE_NOTCH=185x32 cargo run -p mini-lyrics   # paksa bentuk notch (mode Notch)
-cargo test --workspace                   # semua test (core juga jalan di Linux)
-cargo test -p mini-lyrics-core           # test logika inti saja
-cargo build --release -p mini-lyrics     # binary rilis di target/release/
-
-# macOS: susun MiniLyrics.app (+ codesign ad-hoc) ke dist/
-scripts/bundle-macos.sh                  # pakai target/release/mini-lyrics
+git clone https://github.com/red-cards/floating-lyric.git && cd floating-lyric
+cargo run -p mini-lyrics                       # jalankan (debug)
+MINI_LYRICS_DEMO=1 cargo run -p mini-lyrics    # demo: lagu & lirik palsu
+cargo test --workspace                         # semua test
+cargo build --release -p mini-lyrics           # → target/release/mini-lyrics(.exe)
+scripts/bundle-macos.sh                        # macOS: → dist/MiniLyrics.app
 ```
 
-Windows PowerShell untuk mode demo: `$env:MINI_LYRICS_DEMO=1; cargo run -p mini-lyrics`.
-
-Commit pendek yang tampil di tray disuntikkan oleh `crates/app/build.rs`
-(`GITHUB_SHA` di CI, atau `git rev-parse --short HEAD` di lokal).
+Windows PowerShell: `$env:MINI_LYRICS_DEMO = "1"; cargo run -p mini-lyrics`.
 
 ## Struktur
 
