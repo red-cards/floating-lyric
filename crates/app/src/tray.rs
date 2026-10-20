@@ -19,6 +19,10 @@ pub enum TrayAction {
     OffsetEarlier,
     OffsetLater,
     ResetOffset,
+    /// Pilih kandidat lirik lain (lirik yang ketemu tidak cocok).
+    NextLyrics,
+    /// Kandidat lirik sebelumnya (hanya dari tombol panel).
+    PrevLyrics,
     ToggleDebug,
     OpenLogFolder,
     Quit,
@@ -126,6 +130,7 @@ mod imp {
             let earlier = MenuItem::new("Lirik lebih cepat 0,5 dtk", true, None);
             let later = MenuItem::new("Lirik lebih lambat 0,5 dtk", true, None);
             let reset = MenuItem::new("Reset offset", true, None);
+            let next_lyrics = MenuItem::new("Coba lirik lain", true, None);
             let offset = MenuItem::new(offset_label(settings.offset_secs), false, None);
             let debug = CheckMenuItem::new("Mode debug", true, settings.debug, None);
             let logs = MenuItem::new("Buka folder log", true, None);
@@ -147,6 +152,8 @@ mod imp {
                 &earlier,
                 &later,
                 &reset,
+                &sep(),
+                &next_lyrics,
                 &sep(),
                 &debug,
                 &logs,
@@ -174,6 +181,7 @@ mod imp {
                 (earlier.id().clone(), TrayAction::OffsetEarlier),
                 (later.id().clone(), TrayAction::OffsetLater),
                 (reset.id().clone(), TrayAction::ResetOffset),
+                (next_lyrics.id().clone(), TrayAction::NextLyrics),
                 (debug.id().clone(), TrayAction::ToggleDebug),
                 (logs.id().clone(), TrayAction::OpenLogFolder),
                 (quit.id().clone(), TrayAction::Quit),
@@ -293,7 +301,10 @@ pub fn apply_to_settings(action: TrayAction, s: &mut Settings) -> bool {
         TrayAction::OffsetLater => s.offset_secs = round_offset(s.offset_secs - 0.5),
         TrayAction::ResetOffset => s.offset_secs = 0.0,
         TrayAction::ToggleDebug => s.debug = !s.debug,
-        TrayAction::OpenLogFolder | TrayAction::Quit => return false,
+        TrayAction::NextLyrics
+        | TrayAction::PrevLyrics
+        | TrayAction::OpenLogFolder
+        | TrayAction::Quit => return false,
     }
     true
 }

@@ -57,6 +57,12 @@ Tips umum:
 |---|---|---|---|
 | Posisi awal (tanpa setting) | Tengah bawah monitor utama | ☐ | ☐ |
 | Drag panel | Window pindah; editor tidak kehilangan fokus (Windows) | ☐ | ☐ |
+| Kursor di atas panel (click-through mati) | Muncul `− Sinkron +` (kiri atas) dan `Lirik lain` (kanan atas); hilang lagi saat kursor keluar | ☐ | ☐ |
+| Klik `+` / `−` di panel | Offset berubah 0,5 dtk, label menunjukkan offset, menu tray ikut berubah; klik label = reset | ☐ | ☐ |
+| Klik `Lirik lain` pada lagu yang liriknya salah | "Nyari lirik lain…" lalu lirik berganti; `‹ 2/N ›` untuk pindah antar kandidat, bisa kembali ke hasil awal | ☐ | ☐ |
+| `Lirik lain` saat "Lirik sinkron nggak ketemu" | Kalau ada kandidat, lirik tampil; kalau tidak, "Nggak ada lirik lain" | ☐ | ☐ |
+| Tray → Coba lirik lain (mis. mode Notch / click-through) | Sama dengan tombol `Lirik lain` | ☐ | ☐ |
+| Klik tombol panel | Tidak ikut men-drag window | ☐ | ☐ |
 | Restart app | Posisi, offset, click-through, debug tetap seperti sebelumnya | ☐ | ☐ |
 | Mengetik di editor sambil lirik jalan | Fokus tetap di editor | ☐ | ☐ |
 | App lain full-screen (VS Code/browser full-screen, video) | Lirik tetap di atas (kalau tidak: catat sebagai known issue) | ☐ | ☐ |

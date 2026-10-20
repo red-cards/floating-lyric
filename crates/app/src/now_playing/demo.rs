@@ -2,12 +2,16 @@
 //! mengecek UI tanpa Spotify/jaringan.
 //!
 //! Selain `1`, nilai lain menampilkan satu state tertentu:
-//! `paused`, `loading`, `notfound`, `error`, `idle`.
+//! `paused`, `loading`, `notfound`, `error`, `idle`. Tombol "Lirik lain"
+//! menawarkan tiga kandidat palsu.
 
 use std::time::{Duration, Instant};
 
 use mini_lyrics_core::lrc::parse_lrc;
-use mini_lyrics_core::{FetchOutcome, LyricsProvider, PlayerState, TrackQuery};
+use mini_lyrics_core::{
+    candidate_label, FetchOutcome, LyricLine, LyricsCandidate, LyricsProvider, PlayerState,
+    TrackQuery,
+};
 
 use super::NowPlayingSource;
 
@@ -114,5 +118,43 @@ impl LyricsProvider for Provider {
             }
             _ => FetchOutcome::Found(parse_lrc(LRC)),
         }
+    }
+
+    /// Tiga kandidat palsu untuk mencoba tombol "Lirik lain": lirik demo,
+    /// versi yang telat 1,5 dtk, dan lirik lain sama sekali.
+    fn alternatives(&self, _query: &TrackQuery) -> Result<Vec<LyricsCandidate>, String> {
+        if scenario() == Some(Scenario::NetworkError) {
+            return Err("demo: koneksi ditolak".into());
+        }
+        std::thread::sleep(Duration::from_millis(600));
+        let original = parse_lrc(LRC);
+        let late: Vec<LyricLine> = original
+            .iter()
+            .map(|l| LyricLine {
+                time_secs: l.time_secs + 1.5,
+                text: l.text.clone(),
+            })
+            .collect();
+        let other = parse_lrc(
+            "[00:01.00]Ini lirik lagu lain\n[00:08.00]Yang judulnya mirip\n[00:16.00]Pilih kandidat berikutnya\n",
+        );
+        let label = |title: &str| candidate_label(title, "MiniLyrics", Some(DURATION));
+        Ok(vec![
+            LyricsCandidate {
+                id: Some(1),
+                label: label("Lagu Demo"),
+                lines: original,
+            },
+            LyricsCandidate {
+                id: Some(2),
+                label: label("Lagu Demo (Radio Edit)"),
+                lines: late,
+            },
+            LyricsCandidate {
+                id: Some(3),
+                label: candidate_label("Lagu Demo", "Band Lain", Some(212.0)),
+                lines: other,
+            },
+        ])
     }
 }

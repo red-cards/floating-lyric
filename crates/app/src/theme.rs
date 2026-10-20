@@ -130,6 +130,29 @@ pub const PAUSE_BAR_GAP: f32 = 3.0;
 pub const PAUSE_BARS_POS: Vec2 = vec2(19.0, 51.0);
 pub const PAUSE_BAR_COLOR: Tint = Tint::new(0xFFFFFF, 1.0);
 
+/// Kontrol yang muncul saat kursor di atas panel (hanya kalau click-through
+/// mati): geser sinkron di kiri atas, pilih lirik lain di kanan atas.
+/// Saat tidak di-hover panel tetap bersih tanpa tombol.
+pub const CONTROLS_TOP: f32 = 7.0;
+pub const CONTROLS_INSET_X: f32 = 8.0;
+pub const CONTROL_HEIGHT: f32 = 22.0;
+/// Lebar tombol ikon (−, +, ‹, ›) dan padding tombol teks.
+pub const CONTROL_ICON_WIDTH: f32 = 22.0;
+pub const CONTROL_TEXT_PAD_X: f32 = 8.0;
+pub const CONTROL_RADIUS: u8 = 11;
+pub const CONTROL_GROUP_BG: Tint = Tint::new(0x2A2A2A, 0.96);
+pub const CONTROL_HOVER_BG: Tint = Tint::new(0xFFFFFF, 0.12);
+pub const CONTROL_PRESS_BG: Tint = Tint::new(0xFFFFFF, 0.20);
+pub const CONTROL_ICON_COLOR: Tint = Tint::new(0xFFFFFF, 0.85);
+pub const CONTROL_ICON_SIZE: f32 = 8.0;
+pub const CONTROL_ICON_STROKE: f32 = 1.5;
+pub const CONTROL_TEXT: TextStyle = TextStyle::new(11.0, 500.0, 14.0);
+pub const CONTROL_TEXT_COLOR: Tint = Tint::new(0xFFFFFF, 0.75);
+/// Opacity tombol yang tidak bisa diklik (mis. "Nyari…").
+pub const CONTROL_DISABLED_ALPHA: f32 = 0.45;
+/// Kontrol fade-in/out saat kursor masuk/keluar panel.
+pub const CONTROLS_FADE: f32 = 0.15;
+
 /// Opacity panel saat kursor berada di atasnya dan click-through aktif
 /// (atau di mode notch), supaya yang di bawahnya tetap terlihat.
 pub const HOVER_OPACITY: f32 = 0.3;

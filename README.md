@@ -51,11 +51,20 @@ tanpa Node/web), jalan di **macOS** dan **Windows**.
 | Click-through | Klik tembus ke window di bawahnya (tidak bisa di-drag). Disimpan terpisah per mode; mode Notch default aktif |
 | Mode tampilan: Notch / Panel bawah | Pilih mode tampilan (lihat di bawah); tersimpan di setting |
 | Lirik lebih cepat / lebih lambat 0,5 dtk, Reset offset | Koreksi sinkron |
+| Coba lirik lain | Lirik yang ketemu salah lagu/versi: cari kandidat lain di LRCLIB dan pindah ke berikutnya |
 | Mode debug | Overlay info: sumber, posisi mentah/interpolasi, offset, status & latency LRCLIB, umur sampel |
 | Buka folder log | Buka folder log di Explorer/Finder |
 | Keluar | |
 
-Window bisa dipindah dengan drag (tombol kiri) di panel lirik. Posisi, offset,
+Window bisa dipindah dengan drag (tombol kiri) di panel lirik. Saat kursor di
+atas panel (click-through mati) muncul dua kontrol kecil:
+
+- **Kiri atas `− Sinkron +`**: geser lirik 0,5 dtk (`+` = lirik lebih cepat).
+  Kalau offset tidak nol, labelnya jadi offset sekarang; klik untuk reset.
+- **Kanan atas `Lirik lain`**: cari kandidat lirik lain (pencarian LRCLIB yang
+  lebih luas, urut dari durasi paling cocok), lalu pindah dengan `‹ 2/5 ›`.
+  Juga muncul saat "Lirik sinkron nggak ketemu". Pilihan diingat per lagu
+  selama app jalan. Posisi, offset,
 click-through, mode tampilan, dan mode debug tersimpan otomatis.
 
 ### Mode tampilan
