@@ -1,7 +1,8 @@
 //! Penyesuaian window native yang tidak disediakan egui/winit.
 //!
 //! Dipanggil ulang setelah perintah viewport yang bisa menimpa style
-//! (mis. MousePassthrough di Windows menulis ulang extended style).
+//! (mis. MousePassthrough di Windows menulis ulang style & extended style),
+//! dan secara berkala karena winit bisa menulis ulang style kapan saja.
 
 use raw_window_handle::HasWindowHandle;
 
@@ -10,9 +11,10 @@ pub fn apply(window: &dyn HasWindowHandle) {
     use raw_window_handle::RawWindowHandle;
     use windows::Win32::Foundation::HWND;
     use windows::Win32::UI::WindowsAndMessaging::{
-        GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, SWP_FRAMECHANGED,
-        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_EX_APPWINDOW, WS_EX_NOACTIVATE,
-        WS_EX_TOOLWINDOW,
+        GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, GWL_STYLE,
+        SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_BORDER,
+        WS_CAPTION, WS_DLGFRAME, WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+        WS_EX_WINDOWEDGE, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP, WS_SYSMENU, WS_THICKFRAME,
     };
 
     let Ok(handle) = window.window_handle() else {
@@ -24,13 +26,30 @@ pub fn apply(window: &dyn HasWindowHandle) {
     };
     let hwnd = HWND(h.hwnd.get() as *mut core::ffi::c_void);
     unsafe {
+        // winit selalu memasang WS_CAPTION | WS_BORDER | WS_SYSMENU (juga di
+        // window tanpa dekorasi) lalu menyembunyikannya lewat WM_NCCALCSIZE.
+        // Digabung WS_EX_TOOLWINDOW, Windows tetap menggambar bingkai tipis
+        // dan tombol × tool window. Jadikan WS_POPUP murni tanpa bingkai.
+        let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+        let frame = (WS_CAPTION
+            | WS_BORDER
+            | WS_DLGFRAME
+            | WS_SYSMENU
+            | WS_THICKFRAME
+            | WS_MINIMIZEBOX
+            | WS_MAXIMIZEBOX)
+            .0 as isize;
+        let wanted_style = (style & !frame) | WS_POPUP.0 as isize;
+
         let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
         // TOOLWINDOW: tidak muncul di Alt+Tab. NOACTIVATE: klik tidak
         // mencuri fokus dari editor.
-        let wanted = (ex | (WS_EX_TOOLWINDOW.0 | WS_EX_NOACTIVATE.0) as isize)
-            & !(WS_EX_APPWINDOW.0 as isize);
-        if wanted != ex {
-            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, wanted);
+        let wanted_ex = (ex | (WS_EX_TOOLWINDOW.0 | WS_EX_NOACTIVATE.0) as isize)
+            & !((WS_EX_APPWINDOW.0 | WS_EX_WINDOWEDGE.0) as isize);
+
+        if wanted_style != style || wanted_ex != ex {
+            SetWindowLongPtrW(hwnd, GWL_STYLE, wanted_style);
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, wanted_ex);
             let _ = SetWindowPos(
                 hwnd,
                 None,
@@ -40,10 +59,10 @@ pub fn apply(window: &dyn HasWindowHandle) {
                 0,
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
             );
-            log::debug!("WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE diterapkan");
+            log::debug!("style window: WS_POPUP tanpa bingkai, TOOLWINDOW | NOACTIVATE");
+            hide_dwm_frame(hwnd);
         }
     }
-    hide_dwm_frame(hwnd);
 }
 
 /// Windows 11 menggambar border 1 px dan sudut membulat di semua window,
@@ -103,7 +122,7 @@ pub fn apply(window: &dyn HasWindowHandle) {
     // NSStatusWindowLevel (25) > NSMainMenuWindowLevel (24): di atas menu bar
     // (perlu untuk mode notch) dan di atas app full-screen.
     ns_window.setLevel(NSStatusWindowLevel);
-    log::debug!("NSWindow: collectionBehavior, tanpa shadow, NSStatusWindowLevel diterapkan");
+    log::trace!("NSWindow: collectionBehavior, tanpa shadow, NSStatusWindowLevel diterapkan");
 }
 
 #[cfg(not(any(windows, target_os = "macos")))]

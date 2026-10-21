@@ -25,6 +25,9 @@ use crate::tray::{self, Tray, TrayAction};
 
 /// Seberapa sering posisi/layar target mode notch dicek ulang.
 const TOP_RECHECK: Duration = Duration::from_secs(2);
+/// Seberapa sering style window native dicek & diterapkan ulang (murah:
+/// hanya ditulis kalau berbeda).
+const OS_REAPPLY: Duration = Duration::from_secs(1);
 
 /// Tata letak window yang sedang diterapkan.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -92,6 +95,9 @@ pub struct MiniLyricsApp {
 
     /// Jumlah frame lagi sampai penyesuaian window native diterapkan ulang.
     os_apply_in: Option<u8>,
+    /// Kapan penyesuaian window native terakhir diterapkan. Diulang berkala
+    /// karena winit bisa menulis ulang style window (mis. bingkai Windows).
+    last_os_apply: Option<Instant>,
     applied_passthrough: Option<bool>,
     applied_layout: Option<Layout>,
     /// Bentuk mode notch (notch asli atau pill), dicek ulang berkala.
@@ -137,6 +143,7 @@ impl MiniLyricsApp {
             tray: None,
             tray_tried: false,
             os_apply_in: Some(0),
+            last_os_apply: None,
             applied_passthrough: None,
             applied_layout: None,
             notch_kind: Kind::Pill,
@@ -209,12 +216,19 @@ impl MiniLyricsApp {
             DisplayMode::Notch => self.sync_notch_layout(frame),
         }
 
+        let periodic_due = self
+            .last_os_apply
+            .is_some_and(|t| t.elapsed() >= OS_REAPPLY);
+        if periodic_due && self.os_apply_in.is_none() {
+            self.os_apply_in = Some(0);
+        }
         if let Some(n) = self.os_apply_in {
             if n == 0 {
                 if let Some(w) = frame.winit_window() {
                     os_window::apply(w.as_ref());
                 }
                 self.os_apply_in = None;
+                self.last_os_apply = Some(Instant::now());
             } else {
                 self.os_apply_in = Some(n - 1);
             }
