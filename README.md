@@ -7,8 +7,8 @@ tanpa Node/web), jalan di **macOS** dan **Windows**.
 - Baca lagu yang sedang diputar (Spotify di macOS; semua player di media
   overlay Windows, termasuk Spotify Web/YouTube Music di browser).
 - Ambil lirik sinkron dari [LRCLIB](https://lrclib.net) (gratis, tanpa API key).
-- Tampil 3 baris dengan efek karaoke (gaya "Kalem": putih redup terisi putih
-  penuh dari kiri), always on top, tidak mencuri fokus
+- Tampil 3 baris; baris aktif menyala penuh begitu baris itu dimulai (gaya
+  "Kalem": putih redup → putih penuh), always on top, tidak mencuri fokus
   editor, bisa click-through, atur offset dari tray.
 
 ## Cara pakai tanpa build (dari artifact CI)
@@ -74,7 +74,7 @@ click-through, mode tampilan, dan mode debug tersimpan otomatis.
 - **Notch** (desain gaya D): panel hitam pekat yang tumbuh dari notch fisik.
   - **Expanded** (560×80): "telinga" di kiri & kanan kamera berisi judul
     (kiri) dan artis · posisi + equalizer kuning (kanan), lalu satu baris lirik
-    karaoke 20/600 putih redup → kuning `#FFD64D`. Area kamera selalu kosong.
+    20/600 putih redup yang menyala kuning `#FFD64D` begitu baris dimulai. Area kamera selalu kosong.
     Sudut atas melengkung ke dalam menyatu dengan tepi layar, sudut bawah r18.
   - **Collapsed** (lebar notch + 72, mis. 272×32): ♪ di kiri, equalizer di
     kanan (diam saat lagu dijeda/belum diputar). Dijeda: ❚❚ kuning, lirik &
