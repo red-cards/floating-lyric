@@ -225,6 +225,9 @@ impl MiniLyricsApp {
         if let Some(n) = self.os_apply_in {
             if n == 0 {
                 if let Some(w) = frame.winit_window() {
+                    // Lebih dulu: winit menulis ulang style saat flag shadow
+                    // berubah, jadi style kita diterapkan sesudahnya.
+                    os_window::disable_undecorated_shadow(w.as_ref());
                     os_window::apply(w.as_ref());
                 }
                 self.os_apply_in = None;
