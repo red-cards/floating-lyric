@@ -65,6 +65,21 @@ pub fn apply(window: &dyn HasWindowHandle) {
     }
 }
 
+/// Matikan "undecorated shadow" winit yang dinyalakan egui untuk window
+/// tanpa bingkai. Untuk shadow itu winit menggeser area klien 1 px ke bawah
+/// di `WM_NCCALCSIZE`, sehingga muncul garis 1 px di tepi atas window (pill
+/// mode Notch jadi terlihat tidak menempel ke tepi layar). Panel menggambar
+/// shadow sendiri dan mode Notch memang tanpa shadow. Tidak melakukan apa-apa
+/// kalau sudah mati.
+#[cfg(windows)]
+pub fn disable_undecorated_shadow(window: &winit::window::Window) {
+    use winit::platform::windows::WindowExtWindows;
+    window.set_undecorated_shadow(false);
+}
+
+#[cfg(not(windows))]
+pub fn disable_undecorated_shadow(_window: &winit::window::Window) {}
+
 /// Windows 11 menggambar border 1 px dan sudut membulat di semua window,
 /// termasuk window tanpa dekorasi. Karena window MiniLyrics lebih besar dari
 /// panel/pill dan sisanya transparan, border itu jadi terlihat sebagai garis
