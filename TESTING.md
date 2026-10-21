@@ -29,7 +29,7 @@ Tips umum:
 
 | Skenario | Yang diharapkan | macOS | Windows |
 |---|---|---|---|
-| Putar lagu populer | "Nyari lirik…" lalu lirik muncul; baris aktif terisi putih penuh dari kiri seirama | ☐ | ☐ |
+| Putar lagu populer | "Nyari lirik…" lalu lirik muncul; baris aktif langsung menyala putih penuh tepat saat baris itu mulai dinyanyikan | ☐ | ☐ |
 | Ganti lagu (next/prev) | Lirik berganti ≤ ~1–2 dtk; tidak pernah menampilkan lirik lagu sebelumnya | ☐ | ☐ |
 | Kembali ke lagu sebelumnya | Lirik langsung muncul (cache), tanpa "Nyari lirik…" lama | ☐ | ☐ |
 | Seek maju | Baris lompat ke posisi baru ≤ ~1 dtk | ☐ | ☐ |
@@ -77,7 +77,7 @@ Tips umum:
 | Skenario | Yang diharapkan | macOS | Windows |
 |---|---|---|---|
 | Tray → Tampilan: Notch | Centang pindah (seperti radio); window pindah ke tengah atas | ☐ | ☐ |
-| Mac ber-notch, lagu diputar | Panel hitam 560×80 tumbuh dari notch: telinga kiri = judul, kanan = artis · posisi + equalizer kuning bergerak; 1 baris lirik di bawah kamera, terisi kuning | ☐ | – |
+| Mac ber-notch, lagu diputar | Panel hitam 560×80 tumbuh dari notch: telinga kiri = judul, kanan = artis · posisi + equalizer kuning bergerak; 1 baris lirik di bawah kamera, menyala kuning saat baris dimulai | ☐ | – |
 | Area kamera | Tidak ada teks/ikon di zona tengah atas selebar notch | ☐ | – |
 | Sudut bentuk | Sudut atas melengkung ke dalam menyatu dengan tepi layar, sudut bawah membulat | ☐ | – |
 | Posisi di atas menu bar | Bentuk menempel ke tepi atas layar, tidak terdorong ke bawah menu bar (cek log kalau ada `di-constrain`) | ☐ | – |

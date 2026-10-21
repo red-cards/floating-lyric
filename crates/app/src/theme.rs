@@ -90,7 +90,8 @@ pub const ACTIVE_TEXT: TextStyle = TextStyle {
     letter_spacing_em: -0.01,
     ..TextStyle::new(22.0, 600.0, 30.0)
 };
-/// Karaoke: teks putih redup terisi putih penuh dari kiri ke kanan.
+/// Baris aktif: putih redup, lalu seluruh baris menyala putih penuh begitu
+/// baris dimulai (LRC hanya punya waktu per baris).
 pub const ACTIVE_BASE: Tint = Tint::new(0xFFFFFF, 0.50);
 pub const ACTIVE_FILL: Tint = Tint::new(0xFFFFFF, 1.0);
 /// Baris berikutnya: kecil, sedikit lebih terang dari baris sebelumnya.
@@ -198,6 +199,8 @@ pub const STATE_FADE: f32 = 0.18;
 pub const LINE_SHIFT: f32 = 0.22;
 pub const LINE_SHIFT_PX: f32 = 6.0;
 pub const LINE_SHIFT_FROM_ALPHA: f32 = 0.4;
+/// Baris aktif menyala penuh (redup → terang) dalam waktu ini.
+pub const HIGHLIGHT_FADE: f32 = 0.15;
 /// Titik loading berpindah tiap langkah ini.
 pub const LOADING_STEP: f32 = 0.30;
 
@@ -230,7 +233,7 @@ pub const PILL_RADIUS_EXPANDED: f32 = 22.0;
 /// Jarak ♪ dan equalizer di pill collapsed.
 pub const PILL_COLLAPSED_GAP: f32 = 8.0;
 
-/// Baris aktif: 20/600, putih α0.45 terisi kuning dari kiri.
+/// Baris aktif: 20/600, putih α0.45 lalu seluruh baris menyala kuning.
 pub const NOTCH_ACTIVE_TEXT: TextStyle = TextStyle::new(20.0, 600.0, 26.0);
 pub const NOTCH_ACTIVE_BASE: Tint = Tint::new(0xFFFFFF, 0.45);
 pub const NOTCH_ACTIVE_FILL: Tint = Tint::new(0xFFD64D, 1.0);

@@ -690,8 +690,11 @@ impl MiniLyricsApp {
                 alpha,
             );
         }
+        // Baris aktif menyala penuh begitu mulai (LRC hanya punya waktu per
+        // baris, jadi tidak ada isian per kata yang bisa dipercaya).
+        let lit = animation_t(ui, "highlight", idx, now, theme::HIGHLIGHT_FADE);
         match f.current {
-            Some(text) if !text.trim().is_empty() => draw_karaoke(
+            Some(text) if !text.trim().is_empty() => draw_highlight(
                 painter,
                 pos2(cx, y_active),
                 max_w,
@@ -699,7 +702,7 @@ impl MiniLyricsApp {
                 &active,
                 theme::ACTIVE_BASE.faded(alpha),
                 theme::ACTIVE_FILL.faded(alpha),
-                f.progress,
+                lit,
             ),
             // Sebelum baris pertama: judul — artis. Jeda instrumental: ♪.
             current => {
@@ -872,9 +875,11 @@ impl MiniLyricsApp {
             (Some(p), LyricsStatus::Ready(lines)) => {
                 let pos = p.position_at(now) + self.settings.offset_secs;
                 let f = karaoke::frame_at(lines, pos);
+                let idx = karaoke::active_index(lines, pos);
+                let lit = animation_t(ui, "notch-highlight", idx, now, theme::HIGHLIGHT_FADE);
                 let style = theme::NOTCH_ACTIVE_TEXT;
                 match f.current {
-                    Some(text) if !text.trim().is_empty() => draw_karaoke(
+                    Some(text) if !text.trim().is_empty() => draw_highlight(
                         &row_painter,
                         row.center(),
                         max_w,
@@ -882,7 +887,7 @@ impl MiniLyricsApp {
                         &style,
                         theme::NOTCH_ACTIVE_BASE.faded(cop),
                         theme::NOTCH_ACTIVE_FILL.faded(cop),
-                        f.progress,
+                        lit,
                     ),
                     // Sebelum baris pertama: judul — artis. Jeda instrumental: ♪.
                     current => {
@@ -1747,37 +1752,29 @@ fn draw_text(
     paint_weighted(painter, rect.min, g, style.weight, color);
 }
 
-/// Baris aktif dengan efek karaoke: teks `base`, lalu teks `fill` yang
-/// di-clip dari kiri selebar `progress`.
+/// Baris aktif: teks `base` (redup), lalu seluruh baris dalam warna `lit`
+/// dengan opacity `t` (0..1, fade-in saat baris baru mulai).
 #[allow(clippy::too_many_arguments)]
-fn draw_karaoke(
+fn draw_highlight(
     painter: &Painter,
     center: Pos2,
     max_w: f32,
     text: &str,
     style: &TextStyle,
     base: Color32,
-    fill: Color32,
-    progress: f32,
+    lit: Color32,
+    t: f32,
 ) {
     let (text, size) = fit_line(painter, text, style, max_w, theme::MIN_FONT_SCALE);
     let base_g = text_galley(painter, &text, style, size, base);
     let rect = Align2::CENTER_CENTER.anchor_size(center, base_g.size());
-    paint_weighted(painter, rect.min, base_g, style.weight, base);
-
-    if progress > 0.0 {
-        let bold = fonts::faux_bold_px(style.weight);
-        let clip = Rect::from_min_max(
-            pos2(rect.min.x - 2.0, rect.min.y - 4.0),
-            pos2(
-                rect.min.x + rect.width() * progress + bold,
-                rect.max.y + 4.0,
-            ),
-        )
-        .intersect(painter.clip_rect());
-        let p = painter.with_clip_rect(clip);
-        let fill_g = text_galley(&p, &text, style, size, fill);
-        paint_weighted(&p, rect.min, fill_g, style.weight, fill);
+    if t < 1.0 {
+        paint_weighted(painter, rect.min, base_g, style.weight, base);
+    }
+    if t > 0.0 {
+        let lit = lit.gamma_multiply(t);
+        let lit_g = text_galley(painter, &text, style, size, lit);
+        paint_weighted(painter, rect.min, lit_g, style.weight, lit);
     }
 }
 
