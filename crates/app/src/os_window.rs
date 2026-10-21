@@ -95,10 +95,15 @@ pub fn apply(window: &dyn HasWindowHandle) {
             | NSWindowCollectionBehavior::IgnoresCycle,
     );
     ns_window.setHidesOnDeactivate(false);
+    // Bayangan bawaan macOS dihitung dari isi window dan tidak ikut
+    // diperbarui saat bentuk panel/notch beranimasi, jadi muncul garis tepi
+    // ganda. Panel sudah menggambar bayangannya sendiri; mode notch memang
+    // tanpa bayangan.
+    ns_window.setHasShadow(false);
     // NSStatusWindowLevel (25) > NSMainMenuWindowLevel (24): di atas menu bar
     // (perlu untuk mode notch) dan di atas app full-screen.
     ns_window.setLevel(NSStatusWindowLevel);
-    log::debug!("NSWindow: collectionBehavior + NSStatusWindowLevel diterapkan");
+    log::debug!("NSWindow: collectionBehavior, tanpa shadow, NSStatusWindowLevel diterapkan");
 }
 
 #[cfg(not(any(windows, target_os = "macos")))]
