@@ -43,6 +43,41 @@ pub fn apply(window: &dyn HasWindowHandle) {
             log::debug!("WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE diterapkan");
         }
     }
+    hide_dwm_frame(hwnd);
+}
+
+/// Windows 11 menggambar border 1 px dan sudut membulat di semua window,
+/// termasuk window tanpa dekorasi. Karena window MiniLyrics lebih besar dari
+/// panel/pill dan sisanya transparan, border itu jadi terlihat sebagai garis
+/// tipis di sekeliling area kosong. Matikan keduanya. Di Windows 10 atribut
+/// ini tidak dikenal; error-nya diabaikan.
+#[cfg(windows)]
+fn hide_dwm_frame(hwnd: windows::Win32::Foundation::HWND) {
+    use windows::Win32::Graphics::Dwm::{
+        DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE,
+        DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND,
+    };
+
+    let color: u32 = DWMWA_COLOR_NONE;
+    let corner = DWMWCP_DONOTROUND;
+    unsafe {
+        let border = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_BORDER_COLOR,
+            &color as *const u32 as *const core::ffi::c_void,
+            std::mem::size_of::<u32>() as u32,
+        );
+        let round = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            &corner as *const _ as *const core::ffi::c_void,
+            std::mem::size_of_val(&corner) as u32,
+        );
+        match (border, round) {
+            (Ok(()), Ok(())) => log::debug!("border & sudut DWM dimatikan"),
+            (b, r) => log::debug!("atribut DWM tidak didukung (Windows 10?): {b:?} {r:?}"),
+        }
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -60,10 +95,15 @@ pub fn apply(window: &dyn HasWindowHandle) {
             | NSWindowCollectionBehavior::IgnoresCycle,
     );
     ns_window.setHidesOnDeactivate(false);
+    // Bayangan bawaan macOS dihitung dari isi window dan tidak ikut
+    // diperbarui saat bentuk panel/notch beranimasi, jadi muncul garis tepi
+    // ganda. Panel sudah menggambar bayangannya sendiri; mode notch memang
+    // tanpa bayangan.
+    ns_window.setHasShadow(false);
     // NSStatusWindowLevel (25) > NSMainMenuWindowLevel (24): di atas menu bar
     // (perlu untuk mode notch) dan di atas app full-screen.
     ns_window.setLevel(NSStatusWindowLevel);
-    log::debug!("NSWindow: collectionBehavior + NSStatusWindowLevel diterapkan");
+    log::debug!("NSWindow: collectionBehavior, tanpa shadow, NSStatusWindowLevel diterapkan");
 }
 
 #[cfg(not(any(windows, target_os = "macos")))]
