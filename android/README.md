@@ -67,6 +67,68 @@ adb shell dumpsys media_session          # session aktif + metadata + state
 2. Tekan **Play**: teks di layar dan notifikasi media berganti tiap 2 detik.
 3. Coba Pause / Prev / Next / Stop, dari app maupun dari notifikasi atau lock screen.
 
+## APK dari CI (GitHub Actions)
+
+Workflow `.github/workflows/android.yml` jalan setiap ada push (branch apa pun)
+yang mengubah `android/**`. Bisa juga dijalankan manual: tab **Actions** →
+**Android** → **Run workflow**. Workflow ini menjalankan
+`./gradlew assembleDebug lintDebug` lalu meng-upload dua artifact:
+
+- `minilyrics-android-debug`: berisi `app-debug.apk` (di dalam zip artifact)
+- `minilyrics-android-lint`: laporan lint (HTML, XML, SARIF)
+
+Sidik jari SHA-256 sertifikat APK tercatat di ringkasan run, berguna untuk
+memastikan keystore yang dipakai tetap sama.
+
+### Debug keystore yang konsisten
+
+Android hanya mau meng-install APK baru **menimpa** versi lama kalau
+sertifikatnya sama. Tanpa keystore tetap, setiap run CI membuat debug keystore
+baru, jadi kamu harus uninstall dulu tiap kali (dan log peringatan muncul di
+run).
+
+`app/build.gradle.kts` memakai keystore dari env `MINILYRICS_DEBUG_KEYSTORE`
+kalau di-set. Kalau tidak, dipakai `~/.android/debug.keystore` bawaan mesin.
+CI mengisi env itu dari secret **`DEBUG_KEYSTORE_BASE64`**.
+
+**Opsi 1 (disarankan): pakai debug keystore Mac kamu.** APK dari CI dan dari
+`./gradlew installDebug` di Mac jadi bisa saling menimpa. File ini sudah ada
+kalau kamu pernah build Android di Mac. Kalau belum ada, cukup build sekali.
+
+```sh
+base64 -i ~/.android/debug.keystore | pbcopy     # macOS: salin ke clipboard
+```
+
+**Opsi 2: buat keystore baru khusus proyek ini.**
+
+```sh
+keytool -genkeypair -v -keystore minilyrics-debug.keystore \
+  -storepass android -keypass android -alias androiddebugkey \
+  -keyalg RSA -keysize 2048 -validity 10000 \
+  -dname "CN=Android Debug,O=Android,C=US"
+base64 -i minilyrics-debug.keystore | pbcopy     # macOS
+# Linux: base64 -w0 minilyrics-debug.keystore
+```
+
+Simpan file `.keystore`-nya di luar repo (`*.keystore` sudah di-`.gitignore`).
+Untuk build lokal dengan keystore yang sama:
+`MINILYRICS_DEBUG_KEYSTORE=/path/ke/minilyrics-debug.keystore ./gradlew installDebug`.
+
+**Masukkan ke secret:** repo di GitHub → **Settings → Secrets and variables →
+Actions → New repository secret**. Isi Name dengan `DEBUG_KEYSTORE_BASE64` dan
+Secret dengan hasil base64 tadi (paste) → **Add secret**. Setelah itu jalankan
+ulang workflow. Peringatan "debug keystore default" hilang dan sidik jari di
+ringkasan run sama dengan `keytool -list -v -keystore <file> -storepass android`.
+
+Password dan alias diasumsikan konvensi debug Android (`android` /
+`androiddebugkey`). Kalau keystore-mu berbeda, set juga
+`MINILYRICS_DEBUG_KEYSTORE_PASSWORD`, `MINILYRICS_DEBUG_KEY_ALIAS`, dan
+`MINILYRICS_DEBUG_KEY_PASSWORD`. Ini keystore **debug**, bukan kunci rilis,
+tapi tetap jangan di-commit.
+
+Catatan: secret tidak tersedia untuk workflow dari fork, jadi build dari fork
+selalu memakai keystore default.
+
 ## Mengaktifkan developer mode Android Auto
 
 1. Di HP, buka setting Android Auto. Di kebanyakan HP: **Settings → Connected
