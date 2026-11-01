@@ -47,6 +47,7 @@ Syarat:
 cd android
 ./gradlew assembleDebug                  # → app/build/outputs/apk/debug/app-debug.apk
 ./gradlew installDebug                   # install ke HP yang tercolok (USB debugging aktif)
+./gradlew lintDebug                      # Android lint (harus tanpa error)
 # atau:
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
@@ -100,6 +101,8 @@ adb shell dumpsys media_session          # session aktif + metadata + state
    `./desktop-head-unit -c config/<file-layar-lebar>.ini`. Nama file berbeda
    antar versi DHU. Bisa juga atur ukuran layar lewat `--help`.
 5. Di DHU: buka launcher → **MiniLyrics** → **Mulai tes lirik**.
+   Bisa juga lewat suara: "Hey Google, putar MiniLyrics". Perintah ini masuk ke
+   `onPlayFromSearch`, dan query-nya diabaikan.
 
 Tetap jalankan `adb logcat -s MiniLyrics` di terminal lain selama tes.
 

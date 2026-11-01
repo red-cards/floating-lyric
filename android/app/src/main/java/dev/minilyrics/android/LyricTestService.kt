@@ -124,6 +124,13 @@ class LyricTestService : MediaBrowserServiceCompat() {
             play()
         }
 
+        override fun onPlayFromSearch(query: String?, extras: Bundle?) {
+            // Perintah suara ("Hey Google, putar MiniLyrics"); query diabaikan.
+            Log.i(TAG, "onPlayFromSearch query=\"$query\"")
+            index = 0
+            play()
+        }
+
         override fun onPause() {
             Log.i(TAG, "onPause")
             pause()
@@ -314,7 +321,6 @@ class LyricTestService : MediaBrowserServiceCompat() {
     }
 
     private fun createChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val channel = NotificationChannel(
             CHANNEL_ID, getString(R.string.channel_name), NotificationManager.IMPORTANCE_LOW
         )
@@ -344,6 +350,7 @@ class LyricTestService : MediaBrowserServiceCompat() {
                 PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
                 PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
                 PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID or
+                PlaybackStateCompat.ACTION_PLAY_FROM_SEARCH or
                 PlaybackStateCompat.ACTION_SEEK_TO
 
         /** Baris dummy buatan sendiri — bukan lirik lagu asli. */
