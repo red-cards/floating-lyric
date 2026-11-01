@@ -1,3 +1,18 @@
 /target
 .DS_Store
 /dist
+
+# Android (project Gradle mandiri di android/)
+/android/.gradle/
+/android/build/
+/android/app/build/
+/android/local.properties
+/android/.idea/
+/android/**/*.iml
+/android/captures/
+/android/.kotlin/
+*.apk
+*.aab
+*.jks
+*.keystore
+keystore.properties
