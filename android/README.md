@@ -110,6 +110,19 @@ base64 -i minilyrics-debug.keystore | pbcopy     # macOS
 # Linux: base64 -w0 minilyrics-debug.keystore
 ```
 
+**Windows (PowerShell).** Kalau `keytool` tidak dikenali, pakai yang dibawa
+Android Studio: `& "C:\Program Files\Android\Android Studio\jbr\bin\keytool.exe"`.
+
+```powershell
+cd $HOME
+keytool -genkeypair -v -keystore minilyrics-debug.keystore -storepass android -keypass android -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("$HOME\minilyrics-debug.keystore")) | Set-Clipboard
+# Opsi 1 di Windows: ganti path di atas dengan "$HOME\.android\debug.keystore"
+```
+
+Build lokal di Windows dengan keystore itu:
+`$env:MINILYRICS_DEBUG_KEYSTORE = "$HOME\minilyrics-debug.keystore"; .\gradlew.bat installDebug`.
+
 Simpan file `.keystore`-nya di luar repo (`*.keystore` sudah di-`.gitignore`).
 Untuk build lokal dengan keystore yang sama:
 `MINILYRICS_DEBUG_KEYSTORE=/path/ke/minilyrics-debug.keystore ./gradlew installDebug`.
