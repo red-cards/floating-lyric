@@ -1,0 +1,84 @@
+name: Android
+
+# Workflow terpisah untuk project Gradle di android/. Workflow Rust ada di ci.yml.
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "android/**"
+      - ".github/workflows/android.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: assembleDebug + lintDebug
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+          cache-dependency-path: |
+            android/*.gradle.kts
+            android/app/*.gradle.kts
+            android/gradle/wrapper/gradle-wrapper.properties
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools platforms;android-34 build-tools;34.0.0"
+
+      # Keystore debug yang sama di setiap build, supaya APK dari CI bisa
+      # di-install menimpa versi sebelumnya. Dibaca app/build.gradle.kts lewat
+      # env MINILYRICS_DEBUG_KEYSTORE.
+      - name: Siapkan debug keystore
+        env:
+          DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$DEBUG_KEYSTORE_BASE64" ]; then
+            ks="$RUNNER_TEMP/debug.keystore"
+            printf '%s' "$DEBUG_KEYSTORE_BASE64" | base64 --decode > "$ks"
+            echo "MINILYRICS_DEBUG_KEYSTORE=$ks" >> "$GITHUB_ENV"
+            echo "Memakai debug keystore dari secret DEBUG_KEYSTORE_BASE64."
+          else
+            echo "::warning title=Debug keystore::Secret DEBUG_KEYSTORE_BASE64 tidak ada, jadi build memakai debug keystore default yang dibuat ulang tiap run. APK dari run berbeda tidak bisa di-install menimpa satu sama lain (harus uninstall dulu). Lihat android/README.md bagian CI."
+          fi
+
+      - name: Build & lint
+        run: ./gradlew assembleDebug lintDebug --stacktrace
+
+      - name: Sidik jari sertifikat APK
+        run: |
+          apksigner="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner"
+          "$apksigner" verify --print-certs app/build/outputs/apk/debug/app-debug.apk | tee certs.txt
+          {
+            echo "### APK debug"
+            echo '```'
+            grep 'SHA-256' certs.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: minilyrics-android-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: minilyrics-android-lint
+          path: android/app/build/reports/lint-results-debug.*
+          if-no-files-found: warn
