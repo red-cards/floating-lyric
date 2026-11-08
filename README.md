@@ -11,6 +11,17 @@ tanpa Node/web), jalan di **macOS** dan **Windows**.
   "Kalem": putih redup → putih penuh), always on top, tidak mencuri fokus
   editor, bisa click-through, atur offset dari tray.
 
+## Android / Android Auto (eksperimental)
+
+Folder [`android/`](android/) berisi project Gradle (Kotlin) terpisah yang
+menampilkan **lirik tersinkron lagu Spotify di card media Android Auto**. App
+menyamar sebagai media app (title/subtitle card = baris lirik aktif), audio
+tetap dari Spotify, dan tombol card diteruskan ke Spotify. Lirik dari LRCLIB
+dengan aturan pencocokan yang sama dengan versi desktop (di-port ke Kotlin).
+Untuk pemakaian pribadi lewat sideload. Izin, cara kerja, build, tes dengan DHU,
+dan keterbatasan ada di **[android/README.md](android/README.md)**. Build Rust
+tidak terpengaruh.
+
 ## Cara pakai tanpa build (dari artifact CI)
 
 1. Buka tab **Actions** → pilih run terbaru dari branch/PR yang mau dites →
@@ -158,6 +169,7 @@ Windows PowerShell: `$env:MINI_LYRICS_DEMO = "1"; cargo run -p mini-lyrics`.
 | `scripts/bundle-macos.sh` | Susun `MiniLyrics.app` + Info.plist + codesign ad-hoc |
 | `.github/workflows/ci.yml` | CI + artifact |
 | `TESTING.md` | Checklist tes manual macOS & Windows |
+| `android/` | Project Android mandiri (Gradle/Kotlin), prototype lirik di Android Auto — lihat `android/README.md` |
 
 ### Alur data
 
