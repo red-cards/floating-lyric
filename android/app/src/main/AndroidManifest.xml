@@ -4,6 +4,13 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Ambil lirik dari LRCLIB. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Supaya tombol "Buka Spotify" bisa menemukan app Spotify (package visibility). -->
+    <queries>
+        <package android:name="com.spotify.music" />
+    </queries>
 
     <application
         android:allowBackup="false"
@@ -32,7 +39,7 @@
         </activity>
 
         <service
-            android:name=".LyricTestService"
+            android:name=".LyricsService"
             android:exported="true"
             android:foregroundServiceType="mediaPlayback">
             <intent-filter>
@@ -41,6 +48,17 @@
             <!-- Supaya MediaButtonReceiver (tombol di notifikasi) menemukan service ini. -->
             <intent-filter>
                 <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </service>
+
+        <!-- Hanya untuk izin MediaSessionManager.getActiveSessions() (baca session Spotify). -->
+        <service
+            android:name=".player.SpotifyNotificationListener"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
 

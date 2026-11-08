@@ -11,8 +11,12 @@ android {
         applicationId = "dev.minilyrics.android"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0-proto"
+        versionCode = 2
+        versionName = "0.2.0"
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     // Debug keystore yang konsisten antar build (CI & lokal), supaya APK baru
@@ -49,9 +53,20 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+
+    testOptions {
+        // android.util.Log di unit test JVM jadi no-op (bukan exception).
+        unitTests.isReturnDefaultValues = true
+        unitTests.all { it.environment("LRCLIB_LIVE", System.getenv("LRCLIB_LIVE") ?: "") }
+    }
 }
 
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.media:media:1.7.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+
+    testImplementation("junit:junit:4.13.2")
+    // org.json asli untuk unit test (yang di android.jar hanya stub).
+    testImplementation("org.json:json:20240303")
 }

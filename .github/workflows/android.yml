@@ -56,8 +56,8 @@ jobs:
             echo "::warning title=Debug keystore::Secret DEBUG_KEYSTORE_BASE64 tidak ada, jadi build memakai debug keystore default yang dibuat ulang tiap run. APK dari run berbeda tidak bisa di-install menimpa satu sama lain (harus uninstall dulu). Lihat android/README.md bagian CI."
           fi
 
-      - name: Build & lint
-        run: ./gradlew assembleDebug lintDebug --stacktrace
+      - name: Build, unit test & lint
+        run: ./gradlew assembleDebug testDebugUnitTest lintDebug --stacktrace
 
       - name: Sidik jari sertifikat APK
         run: |
@@ -75,6 +75,13 @@ jobs:
           name: minilyrics-android-debug
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: minilyrics-android-tests
+          path: android/app/build/reports/tests/testDebugUnitTest/
+          if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v4
         if: always()

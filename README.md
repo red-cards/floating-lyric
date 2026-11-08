@@ -13,12 +13,14 @@ tanpa Node/web), jalan di **macOS** dan **Windows**.
 
 ## Android / Android Auto (eksperimental)
 
-Folder [`android/`](android/) berisi project Gradle (Kotlin) terpisah untuk
-menampilkan lirik di **card media Android Auto**. Caranya, app menyamar sebagai
-media app sementara audio tetap dari Spotify. Masih prototype dengan lirik
-dummy, untuk pemakaian pribadi lewat sideload. Build, cara aktifkan Android
-Auto developer mode, tes dengan DHU, dan skenario tes ada di
-**[android/README.md](android/README.md)**. Build Rust tidak terpengaruh.
+Folder [`android/`](android/) berisi project Gradle (Kotlin) terpisah yang
+menampilkan **lirik tersinkron lagu Spotify di card media Android Auto**. App
+menyamar sebagai media app (title/subtitle card = baris lirik aktif), audio
+tetap dari Spotify, dan tombol card diteruskan ke Spotify. Lirik dari LRCLIB
+dengan aturan pencocokan yang sama dengan versi desktop (di-port ke Kotlin).
+Untuk pemakaian pribadi lewat sideload. Izin, cara kerja, build, tes dengan DHU,
+dan keterbatasan ada di **[android/README.md](android/README.md)**. Build Rust
+tidak terpengaruh.
 
 ## Cara pakai tanpa build (dari artifact CI)
 
